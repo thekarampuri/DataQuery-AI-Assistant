@@ -77,7 +77,9 @@ export type TranslationKey =
   | 'uploadFirst'
   | 'errorOccurred'
   | 'tryAgain'
-  | 'speechNotSupported';
+  | 'speechNotSupported'
+  | 'signOut'
+  | 'dataAnalysis';
 
 export const translations: Record<Language, Record<TranslationKey, string>> = {
   en: {
@@ -183,6 +185,7 @@ export const translations: Record<Language, Record<TranslationKey, string>> = {
     generated: 'Generated on',
     user: 'User',
     assistant: 'Assistant',
+    signOut: 'Sign Out',
   },
   hi: {
     // Hindi translations (same structure as English)
@@ -279,6 +282,7 @@ export const translations: Record<Language, Record<TranslationKey, string>> = {
     generated: 'उत्पन्न किया गया',
     user: 'उपयोगकर्ता',
     assistant: 'सहायक',
+    signOut: 'साइन आउट',
   },
   mr: {
     // Marathi translations (same structure as English)
@@ -375,5 +379,6 @@ export const translations: Record<Language, Record<TranslationKey, string>> = {
     generated: 'तयार केले',
     user: 'वापरकर्ता',
     assistant: 'सहाय्यक',
+    signOut: 'साइन आउट',
   }
 }; 

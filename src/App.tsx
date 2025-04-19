@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Upload, Database, FileSpreadsheet, PieChart, Download, Send, Table, ChevronLeft, ChevronRight, Moon, Sun, Copy, Check, BarChart, LineChart, Mic, MicOff, Volume1, Volume2, Book, Home } from 'lucide-react';
+import { Upload, Database, FileSpreadsheet, PieChart, Download, Send, Table, ChevronLeft, ChevronRight, Moon, Sun, Copy, Check, BarChart, LineChart, Mic, MicOff, Volume1, Volume2, Book, Home, User, LogIn } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import ChartComponent from './components/ChartComponent';
 import jsPDF from 'jspdf';
@@ -11,9 +11,14 @@ import { useLanguage } from './contexts/LanguageContext';
 import LanguageSelector from './components/LanguageSelector';
 import { analyzeDataWithAI } from './utils/gemini';
 import { parseCSVToJSON } from './utils/csvParser';
+import Auth from './components/Auth';
+import LandingPage from './components/LandingPage';
+import { useAuth } from './hooks/useAuth';
+import { auth } from './config/firebase';
+import { signOut } from 'firebase/auth';
 
 // Add these types before the App function
-type SqlType = 'MySQL' | 'SQLite' | 'PostgreSQL';
+type SqlType = 'MySQL';
 
 // Update jsPDF interface
 declare module 'jspdf' {
@@ -181,36 +186,15 @@ const convertExcelToSQL = (tableName: string, schema: DataSchema, data: any[], s
         return val && Number(val) % 1 !== 0;
       });
       
-      switch (type) {
-        case 'MySQL':
-          return hasDecimal ? 'DECIMAL(10,2)' : 'INT';
-        case 'SQLite':
-          return 'NUMERIC';
-        case 'PostgreSQL':
-          return hasDecimal ? 'DECIMAL(10,2)' : 'INTEGER';
-      }
+      return hasDecimal ? 'DECIMAL(10,2)' : 'INT';
     }
     
     if (colType === 'boolean') {
-      switch (type) {
-        case 'MySQL':
-          return 'TINYINT(1)';
-        case 'SQLite':
-          return 'BOOLEAN';
-        case 'PostgreSQL':
-          return 'BOOLEAN';
-      }
+      return 'TINYINT(1)';
     }
     
     if (colType === 'datetime') {
-      switch (type) {
-        case 'MySQL':
-          return 'DATETIME';
-        case 'SQLite':
-          return 'TIMESTAMP';
-        case 'PostgreSQL':
-          return 'TIMESTAMP';
-      }
+      return 'DATETIME';
     }
     
     return 'VARCHAR(255)';
@@ -282,7 +266,11 @@ function App() {
   const [customTableName, setCustomTableName] = useState<string>('');
   const [selectedSqlType, setSelectedSqlType] = useState<SqlType>('MySQL');
   const [showEducation, setShowEducation] = useState(false);
+  const [showAuth, setShowAuth] = useState(false);
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [showLandingPage, setShowLandingPage] = useState(true);
   const { t, language } = useLanguage();
+  const { user, loading, isAuthenticated: authIsAuthenticated } = useAuth();
 
   useEffect(() => {
     const timer = setTimeout(() => {
@@ -889,21 +877,28 @@ function App() {
     setShowSqlQueries(true);
   };
 
+  // Handle guest access
+  const handleGuestAccess = () => {
+    setShowLandingPage(false);
+  };
+
+  // Add sign out handler
+  const handleSignOut = async () => {
+    try {
+      await signOut(auth);
+      setShowLandingPage(true);
+    } catch (error) {
+      console.error('Error signing out:', error);
+    }
+  };
+
+  // Show landing page if not authenticated
+  if (!loading && !authIsAuthenticated && showLandingPage) {
+    return <LandingPage darkMode={darkMode} onGuestAccess={handleGuestAccess} />;
+  }
+
   return (
     <div className={`min-h-screen ${darkMode ? 'bg-gray-900' : 'bg-gradient-to-br from-indigo-50 via-purple-50 to-pink-50'}`}>
-      {showLanding && (
-        <div className="fixed inset-0 flex items-center justify-center bg-black bg-opacity-70 z-50 landing-overlay">
-          <div className="text-center space-y-4">
-            <h1 className="text-5xl font-bold bg-gradient-to-r from-indigo-400 to-purple-400 bg-clip-text text-transparent">
-              {t('dataQueryAI')}
-            </h1>
-            <p className="text-xl text-gray-300">
-              {t('analyzeData')}
-            </p>
-          </div>
-        </div>
-      )}
-
       <nav className={`${darkMode ? 'bg-gray-800 border-gray-700' : 'bg-white border-indigo-100'} shadow-lg border-b`}>
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4">
           <div className="flex items-center justify-between">
@@ -920,6 +915,14 @@ function App() {
             </div>
             <div className="flex items-center space-x-4">
               <LanguageSelector darkMode={darkMode} />
+              {user && (
+                <div className={`flex items-center space-x-2 px-4 py-2 rounded-lg ${
+                  darkMode ? 'bg-gray-700 text-gray-200' : 'bg-gray-100 text-gray-600'
+                }`}>
+                  <User className="h-4 w-4" />
+                  <span className="text-sm font-medium">{user.displayName || user.email}</span>
+                </div>
+              )}
               <div className="flex items-center space-x-2">
                 <button
                   onClick={() => setShowEducation(false)}
@@ -943,6 +946,19 @@ function App() {
                   <Book className="h-4 w-4 mr-2" />
                   {t('learn')}
                 </button>
+                {authIsAuthenticated && (
+                  <button
+                    onClick={handleSignOut}
+                    className={`flex items-center px-4 py-2 rounded-lg text-sm font-medium ${
+                      darkMode
+                        ? 'bg-red-600 text-white hover:bg-red-700'
+                        : 'bg-red-600 text-white hover:bg-red-700'
+                    }`}
+                  >
+                    <LogIn className="h-4 w-4 mr-2" />
+                    {t('signOut')}
+                  </button>
+                )}
               </div>
               <button
                 onClick={() => setDarkMode(!darkMode)}
@@ -960,14 +976,14 @@ function App() {
           <Education darkMode={darkMode} />
         </div>
       ) : (
-        <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+        <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4 sm:py-8">
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 sm:gap-8">
             {/* Left Column */}
-            <div className="space-y-6">
+            <div className="space-y-4 sm:space-y-6">
               {/* File Upload */}
-              <div className={`${darkMode ? 'bg-gray-800 border-gray-700' : 'bg-white border-indigo-100'} rounded-xl shadow-sm border p-6`}>
-                <div className="flex items-center justify-between mb-4">
-                  <h2 className={`text-lg font-semibold ${darkMode ? 'text-white' : 'text-gray-900'}`}>
+              <div className={`${darkMode ? 'bg-gray-800 border-gray-700' : 'bg-white border-indigo-100'} rounded-xl shadow-sm border p-4 sm:p-6`}>
+                <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between mb-4">
+                  <h2 className={`text-lg font-semibold ${darkMode ? 'text-white' : 'text-gray-900'} mb-2 sm:mb-0`}>
                     Data Input
                   </h2>
                   {uploadedFile && (
@@ -1164,9 +1180,9 @@ function App() {
             </div>
 
             {/* Right Column */}
-            <div className="space-y-6">
+            <div className="space-y-4 sm:space-y-6">
               {/* Query Input */}
-              <div className={`${darkMode ? 'bg-gray-800 border-gray-700' : 'bg-white border-indigo-100'} rounded-xl shadow-sm border p-6`}>
+              <div className={`${darkMode ? 'bg-gray-800 border-gray-700' : 'bg-white border-indigo-100'} rounded-xl shadow-sm border p-4 sm:p-6`}>
                 <h2 className={`text-lg font-semibold ${darkMode ? 'text-white' : 'text-gray-900'} mb-4`}>
                   {t('conversationHistory')}
                 </h2>
@@ -1291,6 +1307,92 @@ function App() {
                 </form>
               </div>
 
+              {/* Data Visualization */}
+              <div className={`${darkMode ? 'bg-gray-800 border-gray-700' : 'bg-white border-indigo-100'} rounded-xl shadow-sm border p-4 sm:p-6 mt-6`}>
+                <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between mb-4">
+                  <h2 className={`text-lg font-semibold ${darkMode ? 'text-white' : 'text-gray-900'} mb-2 sm:mb-0`}>
+                    {t('dataVisualize')}
+                  </h2>
+                  <div className="flex flex-wrap gap-2 w-full sm:w-auto">
+                    <button
+                      onClick={() => handleChartTypeChange('pie')}
+                      className={`flex-1 sm:flex-none px-3 py-1.5 rounded-lg text-sm font-medium ${
+                        chartType === 'pie'
+                          ? darkMode
+                            ? 'bg-indigo-600 text-white'
+                            : 'bg-indigo-600 text-white'
+                          : darkMode
+                            ? 'bg-gray-700 text-gray-300 hover:bg-gray-600'
+                            : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                      }`}
+                    >
+                      <PieChart className="h-4 w-4 inline-block mr-1" />
+                      {t('pieChart')}
+                    </button>
+                    <button
+                      onClick={() => handleChartTypeChange('bar')}
+                      className={`flex-1 sm:flex-none px-3 py-1.5 rounded-lg text-sm font-medium ${
+                        chartType === 'bar'
+                          ? darkMode
+                            ? 'bg-indigo-600 text-white'
+                            : 'bg-indigo-600 text-white'
+                          : darkMode
+                            ? 'bg-gray-700 text-gray-300 hover:bg-gray-600'
+                            : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                      }`}
+                    >
+                      <BarChart className="h-4 w-4 inline-block mr-1" />
+                      {t('barChart')}
+                    </button>
+                    <button
+                      onClick={() => handleChartTypeChange('line')}
+                      className={`flex-1 sm:flex-none px-3 py-1.5 rounded-lg text-sm font-medium ${
+                        chartType === 'line'
+                          ? darkMode
+                            ? 'bg-indigo-600 text-white'
+                            : 'bg-indigo-600 text-white'
+                          : darkMode
+                            ? 'bg-gray-700 text-gray-300 hover:bg-gray-600'
+                            : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                      }`}
+                    >
+                      <LineChart className="h-4 w-4 inline-block mr-1" />
+                      {t('lineChart')}
+                    </button>
+                  </div>
+                </div>
+
+                {/* Column Selector */}
+                {schema && schema.columns.length > 0 && (
+                  <div className="mb-4">
+                    <label className={`block text-sm font-medium mb-2 ${darkMode ? 'text-gray-300' : 'text-gray-700'}`}>
+                      {t('selectColumnToVisualize')}
+                    </label>
+                    <select
+                      value={selectedColumn}
+                      onChange={(e) => {
+                        setSelectedColumn(e.target.value);
+                        updateChartData(e.target.value);
+                      }}
+                      className={`w-full px-3 py-2 rounded-lg border ${
+                        darkMode
+                          ? 'bg-gray-700 border-gray-600 text-gray-200'
+                          : 'bg-white border-gray-300 text-gray-700'
+                      } focus:ring-2 focus:ring-indigo-500 focus:border-transparent`}
+                    >
+                      {schema.columns.map((column) => (
+                        <option key={column.name} value={column.name}>
+                          {column.name} ({column.type})
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                )}
+
+                {/* Render the chart based on selected type */}
+                {renderChart()}
+              </div>
+
               {/* Results */}
               <div className={`${darkMode ? 'bg-gray-800 border-gray-700' : 'bg-white border-indigo-100'} rounded-xl shadow-sm border p-6`}>
                 <div className="flex items-center justify-between mb-4">
@@ -1366,92 +1468,6 @@ function App() {
                 </div>
               </div>
 
-              {/* Data Visualization */}
-              <div className={`${darkMode ? 'bg-gray-800 border-gray-700' : 'bg-white border-indigo-100'} rounded-xl shadow-sm border p-6 mt-6`}>
-                <div className="flex items-center justify-between mb-4">
-                  <h2 className={`text-lg font-semibold ${darkMode ? 'text-white' : 'text-gray-900'}`}>
-                    {t('dataVisualize')}
-                  </h2>
-                  <div className="flex space-x-2">
-                    <button
-                      onClick={() => handleChartTypeChange('pie')}
-                      className={`px-3 py-1.5 rounded-lg text-sm font-medium ${
-                        chartType === 'pie'
-                          ? darkMode
-                            ? 'bg-indigo-600 text-white'
-                            : 'bg-indigo-600 text-white'
-                          : darkMode
-                            ? 'bg-gray-700 text-gray-300 hover:bg-gray-600'
-                            : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
-                      }`}
-                    >
-                      <PieChart className="h-4 w-4 inline-block mr-1" />
-                      Pie Chart
-                    </button>
-                    <button
-                      onClick={() => handleChartTypeChange('bar')}
-                      className={`px-3 py-1.5 rounded-lg text-sm font-medium ${
-                        chartType === 'bar'
-                          ? darkMode
-                            ? 'bg-indigo-600 text-white'
-                            : 'bg-indigo-600 text-white'
-                          : darkMode
-                            ? 'bg-gray-700 text-gray-300 hover:bg-gray-600'
-                            : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
-                      }`}
-                    >
-                      <BarChart className="h-4 w-4 inline-block mr-1" />
-                      Bar Chart
-                    </button>
-                    <button
-                      onClick={() => handleChartTypeChange('line')}
-                      className={`px-3 py-1.5 rounded-lg text-sm font-medium ${
-                        chartType === 'line'
-                          ? darkMode
-                            ? 'bg-indigo-600 text-white'
-                            : 'bg-indigo-600 text-white'
-                          : darkMode
-                            ? 'bg-gray-700 text-gray-300 hover:bg-gray-600'
-                            : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
-                      }`}
-                    >
-                      <LineChart className="h-4 w-4 inline-block mr-1" />
-                      Line Chart
-                    </button>
-                  </div>
-                </div>
-
-                {/* Column Selector */}
-                {schema && schema.columns.length > 0 && (
-                  <div className="mb-4">
-                    <label className={`block text-sm font-medium mb-2 ${darkMode ? 'text-gray-300' : 'text-gray-700'}`}>
-                      {t('selectColumnToVisualize')}
-                    </label>
-                    <select
-                      value={selectedColumn}
-                      onChange={(e) => {
-                        setSelectedColumn(e.target.value);
-                        updateChartData(e.target.value);
-                      }}
-                      className={`w-full px-3 py-2 rounded-lg border ${
-                        darkMode
-                          ? 'bg-gray-700 border-gray-600 text-gray-200'
-                          : 'bg-white border-gray-300 text-gray-700'
-                      } focus:ring-2 focus:ring-indigo-500 focus:border-transparent`}
-                    >
-                      {schema.columns.map((column) => (
-                        <option key={column.name} value={column.name}>
-                          {column.name} ({column.type})
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                )}
-
-                {/* Render the chart based on selected type */}
-                {renderChart()}
-              </div>
-
               {/* SQL Conversion */}
               <div className={`${darkMode ? 'bg-gray-800 border-gray-700' : 'bg-white border-indigo-100'} rounded-xl shadow-sm border p-6 mt-6`}>
                 <div className="flex items-center justify-between mb-4">
@@ -1461,7 +1477,7 @@ function App() {
                 </div>
 
                 <div className="space-y-4">
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div className="grid grid-cols-1 gap-4">
                     <div>
                       <label className={`block text-sm font-medium mb-2 ${darkMode ? 'text-gray-300' : 'text-gray-700'}`}>
                         {t('tableName')}
@@ -1470,7 +1486,7 @@ function App() {
                         type="text"
                         value={customTableName}
                         onChange={(e) => setCustomTableName(e.target.value)}
-                        placeholder="Enter table name"
+                        placeholder={t('enterTableName')}
                         className={`w-full px-3 py-2 rounded-lg border ${
                           darkMode
                             ? 'bg-gray-700 border-gray-600 text-gray-200'
@@ -1482,27 +1498,21 @@ function App() {
                       <label className={`block text-sm font-medium mb-2 ${darkMode ? 'text-gray-300' : 'text-gray-700'}`}>
                         {t('sqlType')}
                       </label>
-                      <select
-                        value={selectedSqlType}
-                        onChange={(e) => setSelectedSqlType(e.target.value as SqlType)}
-                        className={`w-full px-3 py-2 rounded-lg border ${
-                          darkMode
-                            ? 'bg-gray-700 border-gray-600 text-gray-200'
-                            : 'bg-white border-gray-300 text-gray-700'
-                        } focus:ring-2 focus:ring-indigo-500 focus:border-transparent`}
-                      >
-                        <option value="MySQL">MySQL</option>
-                        <option value="SQLite">SQLite</option>
-                        <option value="PostgreSQL">PostgreSQL</option>
-                      </select>
+                      <div className={`w-full px-3 py-2 rounded-lg border ${
+                        darkMode
+                          ? 'bg-gray-700 border-gray-600 text-gray-200'
+                          : 'bg-white border-gray-300 text-gray-700'
+                      }`}>
+                        MySQL
+                      </div>
                     </div>
                   </div>
 
-                  <div className="flex justify-end">
+                  <div className="flex justify-end mt-4">
                     <button
                       onClick={handleConvertToSQL}
                       disabled={!schema || !data.length || !customTableName.trim()}
-                      className={`inline-flex items-center px-4 py-2 border text-sm font-medium rounded-lg ${
+                      className={`w-full sm:w-auto inline-flex items-center justify-center px-4 py-2 border text-sm font-medium rounded-lg ${
                         darkMode
                           ? 'border-gray-600 text-gray-200 bg-gray-700 hover:bg-gray-600'
                           : 'border-indigo-200 text-indigo-700 bg-indigo-50 hover:bg-indigo-100'
