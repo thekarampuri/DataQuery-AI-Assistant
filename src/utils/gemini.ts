@@ -117,17 +117,43 @@ export const analyzeDataWithAI = async (
     const llmResponse = response.data.candidates[0].content.parts[0].text;
     console.log("📝 LLM Response:", llmResponse);
 
+    // Try to parse the JSON response
+    let parsedResponse;
+    try {
+      // Extract JSON from the response if it's wrapped in markdown code blocks
+      const jsonMatch = llmResponse.match(/```json\n([\s\S]*?)\n```/) || llmResponse.match(/\{[\s\S]*\}/);
+      if (jsonMatch) {
+        parsedResponse = JSON.parse(jsonMatch[1] || jsonMatch[0]);
+      } else {
+        // If no JSON found, create a simple response object
+        parsedResponse = {
+          answer: llmResponse,
+          sqlQuery: '',
+          visualization: null
+        };
+      }
+    } catch (parseError) {
+      console.error('Error parsing LLM response:', parseError);
+      parsedResponse = {
+        answer: llmResponse,
+        sqlQuery: '',
+        visualization: null
+      };
+    }
+
     // Extract SQL query if present in the response
-    const sqlMatch = llmResponse.match(/```sql\n([\s\S]*?)\n```/);
-    const sqlQuery = sqlMatch ? sqlMatch[1].trim() : '';
+    const sqlMatch = parsedResponse.answer.match(/```sql\n([\s\S]*?)\n```/);
+    const sqlQuery = sqlMatch ? sqlMatch[1].trim() : parsedResponse.sqlQuery || '';
 
     // Create the result object
     const result: AnalysisResult = {
-      answer: llmResponse.replace(/```sql\n[\s\S]*?\n```/g, '').trim(), // Remove SQL code blocks
+      answer: parsedResponse.answer.replace(/```sql\n[\s\S]*?\n```/g, '').trim(), // Remove SQL code blocks
       sqlQuery: sqlQuery,
-      needsChart: llmResponse.toLowerCase().includes('visualiz') || llmResponse.toLowerCase().includes('chart'),
-      chartType: determineChartType(llmResponse),
-      chartDataColumn: determineChartColumn(llmResponse, schema.columns)
+      needsChart: parsedResponse.answer.toLowerCase().includes('visualiz') || 
+                 parsedResponse.answer.toLowerCase().includes('chart') ||
+                 parsedResponse.visualization !== null,
+      chartType: determineChartType(parsedResponse.answer),
+      chartDataColumn: determineChartColumn(parsedResponse.answer, schema.columns)
     };
 
     // Add chart data if needed

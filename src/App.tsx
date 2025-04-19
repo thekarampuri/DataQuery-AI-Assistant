@@ -1328,14 +1328,18 @@ function App() {
                 <div ref={resultsRef}>
                   {queryResult ? (
                     <div className="space-y-4">
-                      <div className={`p-4 rounded-lg border relative ${darkMode ? 'bg-gray-900 border-gray-700' : 'bg-gradient-to-r from-indigo-50 to-purple-50 border-indigo-100'}`}>
-                        <p className={darkMode ? 'text-gray-200' : 'text-gray-700'}>
-                          {queryResult.sqlQuery || 'No SQL query available'}
-                        </p>
-                        {queryResult.sqlQuery && (
+                      {/* SQL Query Section */}
+                      {queryResult.sqlQuery && (
+                        <div className={`p-4 rounded-lg border relative ${darkMode ? 'bg-gray-900 border-gray-700' : 'bg-gradient-to-r from-indigo-50 to-purple-50 border-indigo-100'}`}>
+                          <h3 className={`text-sm font-medium mb-2 ${darkMode ? 'text-gray-300' : 'text-gray-700'}`}>
+                            SQL Query
+                          </h3>
+                          <pre className={`whitespace-pre-wrap font-mono text-sm ${darkMode ? 'text-gray-200' : 'text-gray-700'}`}>
+                            {queryResult.sqlQuery}
+                          </pre>
                           <button
                             onClick={() => copyToClipboard(queryResult.sqlQuery, 'sql')}
-                            className={`absolute top-2 right-2 p-1 rounded-full transition-colors ${
+                            className={`absolute top-2 right-2 p-1.5 rounded-full transition-colors ${
                               darkMode 
                                 ? 'hover:bg-gray-600' 
                                 : 'hover:bg-gray-200'
@@ -1348,8 +1352,10 @@ function App() {
                               <Copy className={`h-4 w-4 ${darkMode ? 'text-gray-400' : 'text-gray-600'}`} />
                             )}
                           </button>
-                        )}
-                      </div>
+                        </div>
+                      )}
+
+                      {/* Excel Formula Section */}
                       {excelFormula && (
                         <div className={`p-4 rounded-lg border ${darkMode ? 'bg-gray-900 border-gray-700' : 'bg-gradient-to-r from-indigo-50 to-purple-50 border-indigo-100'}`}>
                           <h3 className={`text-sm font-medium mb-2 ${darkMode ? 'text-gray-300' : 'text-gray-700'}`}>
