@@ -10,6 +10,7 @@ import Education from './components/Education';
 import { useLanguage } from './contexts/LanguageContext';
 import LanguageSelector from './components/LanguageSelector';
 import { analyzeDataWithAI } from './utils/gemini';
+import { parseCSVToJSON } from './utils/csvParser';
 
 // Add these types before the App function
 type SqlType = 'MySQL' | 'SQLite' | 'PostgreSQL';
@@ -410,37 +411,25 @@ function App() {
     if (!file) return;
 
     setUploadedFile(file);
-    
-    const reader = new FileReader();
-    reader.onload = (e) => {
-      const data = new Uint8Array(e.target?.result as ArrayBuffer);
-      const workbook = XLSX.read(data, { type: 'array' });
-      
-      const firstSheet = workbook.Sheets[workbook.SheetNames[0]];
-      const jsonData = XLSX.utils.sheet_to_json(firstSheet) as Record<string, unknown>[];
-      
-      if (jsonData.length > 0) {
-        const firstRow = jsonData[0];
-        const columns = Object.keys(firstRow).map(key => ({
-          name: key,
-          type: detectColumnType(firstRow[key])
-        }));
+    setIsAnalyzing(true);
 
-        setSchema({
-          tableName: file.name.split('.')[0],
-          columns
-        });
-        setData(jsonData);
-        setCurrentPage(1);
-        
-        // Set initial selected column and chart data
-        if (columns.length > 0) {
-          setSelectedColumn(columns[0].name);
-          updateChartData(columns[0].name);
-        }
+    try {
+      const { jsonData, schema } = await parseCSVToJSON(file);
+      setSchema(schema);
+      setData(jsonData);
+      setCurrentPage(1);
+      
+      // Set initial selected column and chart data
+      if (schema.columns.length > 0) {
+        setSelectedColumn(schema.columns[0].name);
+        updateChartData(schema.columns[0].name);
       }
-    };
-    reader.readAsArrayBuffer(file);
+    } catch (error) {
+      console.error('Error parsing file:', error);
+      // Handle error appropriately
+    } finally {
+      setIsAnalyzing(false);
+    }
   };
 
   const analyzeQuery = async (query: string): Promise<QueryResult> => {

@@ -67,8 +67,8 @@ export const analyzeDataWithAI = async (
     Schema:
     ${JSON.stringify(schema, null, 2)}
 
-    Sample Data (first 5 rows):
-    ${JSON.stringify(data.slice(0, 5), null, 2)}
+    Complete Dataset:
+    ${JSON.stringify(data, null, 2)}
 
     Column Statistics:
     ${JSON.stringify(schemaInfo, null, 2)}
