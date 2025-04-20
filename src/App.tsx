@@ -909,7 +909,7 @@ function App() {
               <Database className={`h-6 w-6 sm:h-8 sm:w-8 ${darkMode ? 'text-indigo-400' : 'text-indigo-600'}`} />
               <div>
                 <h1 className={`text-xl sm:text-2xl font-bold ${darkMode ? 'text-white' : 'text-gray-900'}`}>
-                  DataQuery AI
+                  DataQuery AI Assistant
                 </h1>
                 <p className={`text-xs sm:text-sm ${darkMode ? 'text-gray-400' : 'text-gray-500'}`}>
                   Analyze and Visualize Your Data
@@ -1186,7 +1186,7 @@ function App() {
             {/* Right Column */}
             <div className="space-y-4 sm:space-y-6">
               {/* Query Input and Conversation History */}
-              <div className={`${darkMode ? 'bg-gray-800 border-gray-700' : 'bg-white border-indigo-100'} rounded-xl shadow-sm border p-3 sm:p-6`}>
+              <div className={`${darkMode ? 'bg-gray-800 border-gray-700' : 'bg-white border-indigo-100'} rounded-xl shadow-sm border p-3 sm:p-6 mt-4 sm:mt-6`}>
                 <div className="flex items-center justify-between mb-3 sm:mb-4">
                   <h2 className={`text-base sm:text-lg font-semibold ${darkMode ? 'text-white' : 'text-gray-900'}`}>
                     Conversation History

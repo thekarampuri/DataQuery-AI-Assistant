@@ -15,12 +15,15 @@ Here's a quick look at the DataQuery AI Assistant in action:
 - Automatic schema detection
 - Real-time data preview
 - Dark/Light mode support
+- Paginated data view with copy functionality
 
 ### 2. Natural Language Queries 💬
 - Ask questions about your data in plain English
 - Voice input support for queries
 - Real-time query processing
 - Conversation history tracking
+- Text-to-speech response playback
+- Copy query responses to clipboard
 
 ### 3. Interactive Data Visualization 📈
 - Multiple chart types:
@@ -30,23 +33,41 @@ Here's a quick look at the DataQuery AI Assistant in action:
 - Dynamic data updates
 - Column-specific visualizations
 - Dark mode compatible charts
+- Chart title and subtitle support
+- Responsive chart sizing
 
 ### 4. Voice Input Capabilities 🎤
 - Real-time speech-to-text conversion
 - Voice query support
 - Visual feedback during recording
 - Multiple language support
+- Professional voice selection for responses
 
 ### 5. Advanced Data Analysis 📊
 - Automatic data type detection
 - Column-based analysis
 - Distribution visualization
 - Pattern recognition
+- SQL query generation
+- Excel formula suggestions
 
 ### 6. Export Capabilities 📁
-- Export analysis as PDF
+- Export analysis as PDF with:
+  - Conversation history
+  - SQL queries
+  - Visualizations
+  - Professional formatting
 - Copy row data to clipboard
 - Save visualization results
+- Export SQL queries for database import
+
+### 7. User Experience 🎯
+- Responsive design for all screen sizes
+- Smooth animations and transitions
+- Intuitive navigation
+- Clear error handling
+- Loading states and feedback
+- Guest access support
 
 ## 🚀 Getting Started
 
@@ -86,24 +107,36 @@ yarn dev
 
 1. **Upload Data**
    - Click the upload area or drag and drop your CSV/Excel file
-   - Preview your data in the table view
+   - Preview your data in the table view with pagination
+   - Copy individual rows to clipboard
    ![Data Upload](screenshots/data-upload.png)
 
 2. **Query Your Data**
    - Type your question in the query box
-   - Or click the microphone icon to use voice input
+   - Use voice input with the microphone icon
+   - View conversation history
+   - Listen to responses with text-to-speech
    ![Query Interface](screenshots/data-analysis.png)
 
 3. **Visualize Results**
    - Select different chart types using the visualization controls
    - Choose specific columns to analyze
    - Toggle between dark and light modes
+   - View chart data in a grid layout
    ![Data Analysis](screenshots/data-analysis.png)
 
 4. **Export Results**
-   - Click the "Export PDF" button to save your analysis
-   - Use copy buttons to copy specific data rows
+   - Export comprehensive PDF reports
+   - Copy SQL queries for database import
+   - Get Excel formula suggestions
+   - Copy specific data rows
    ![Export Options](screenshots/export-options.png)
+
+5. **SQL Conversion**
+   - Generate SQL queries from your data
+   - Customize table names
+   - Copy generated SQL
+   - Open in online SQL compiler
 
 ## 🛠️ Technologies Used
 
@@ -114,6 +147,8 @@ yarn dev
 - **PDF Export**: jspdf, html2canvas
 - **Voice Input**: Web Speech API
 - **Icons**: Lucide React
+- **State Management**: React Hooks
+- **Authentication**: Firebase Auth
 
 ## 📝 Contributing
 
@@ -132,4 +167,6 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 - Chart.js for the visualization library
 - Tailwind CSS for the styling framework
 - The React community for amazing tools and support
+- Firebase for authentication services
+- Web Speech API for voice capabilities
 
