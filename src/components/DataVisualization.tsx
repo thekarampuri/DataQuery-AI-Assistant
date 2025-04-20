@@ -6,9 +6,17 @@ interface DataVisualizationProps {
   data: Array<{ name: string; value: number }> | undefined;
   chartType: 'pie' | 'bar' | 'line';
   darkMode: boolean;
+  chartTitle?: string;
+  chartSubtitle?: string;
 }
 
-const DataVisualization: React.FC<DataVisualizationProps> = ({ data, chartType, darkMode }) => {
+const DataVisualization: React.FC<DataVisualizationProps> = ({ 
+  data, 
+  chartType, 
+  darkMode,
+  chartTitle,
+  chartSubtitle 
+}) => {
   if (!data || !data.length) {
     return (
       <div className={`h-64 flex items-center justify-center border-2 border-dashed rounded-lg ${darkMode ? 'border-gray-700 bg-gray-900' : 'border-indigo-200 bg-gradient-to-r from-indigo-50 to-purple-50'}`}>
@@ -35,6 +43,8 @@ const DataVisualization: React.FC<DataVisualizationProps> = ({ data, chartType, 
         data={transformedData}
         chartType={chartType}
         darkMode={darkMode}
+        chartTitle={chartTitle}
+        chartSubtitle={chartSubtitle}
       />
     </div>
   );

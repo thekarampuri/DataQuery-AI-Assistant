@@ -30,9 +30,11 @@ interface ChartComponentProps {
   data: Array<{ name: string; value: number }>;
   chartType: 'pie' | 'bar' | 'line';
   darkMode: boolean;
+  chartTitle?: string;
+  chartSubtitle?: string;
 }
 
-const ChartComponent: React.FC<ChartComponentProps> = ({ data, chartType, darkMode }) => {
+const ChartComponent: React.FC<ChartComponentProps> = ({ data, chartType, darkMode, chartTitle, chartSubtitle }) => {
   const chartRef = useRef<ChartJS>(null);
 
   const chartColors = [
@@ -70,7 +72,17 @@ const ChartComponent: React.FC<ChartComponentProps> = ({ data, chartType, darkMo
           }
         },
         title: {
-          display: false
+          display: !!chartTitle,
+          text: chartTitle ? [chartTitle, chartSubtitle || ''] : undefined,
+          color: darkMode ? '#E5E7EB' : '#374151',
+          font: {
+            size: 16,
+            weight: 'bold' as const
+          },
+          padding: {
+            top: 10,
+            bottom: 10
+          }
         }
       }
     };

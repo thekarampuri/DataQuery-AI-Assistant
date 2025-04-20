@@ -10,6 +10,8 @@ interface AnalysisResult {
   chartType: 'pie' | 'bar' | 'line' | null;
   chartDataColumn: string;
   chartData?: Array<{ name: string; value: number }>;
+  chartTitle?: string;
+  chartSubtitle?: string;
 }
 
 /**
@@ -145,15 +147,76 @@ export const analyzeDataWithAI = async (
     const sqlMatch = parsedResponse.answer.match(/```sql\n([\s\S]*?)\n```/);
     const sqlQuery = sqlMatch ? sqlMatch[1].trim() : parsedResponse.sqlQuery || '';
 
-    // Create the result object
+    // Enhanced chart type detection
+    const determineChartTypeFromContext = (query: string, response: string, data: any[]): { 
+      chartType: 'pie' | 'bar' | 'line' | null;
+      chartTitle: string;
+      chartSubtitle: string;
+    } => {
+      const combinedText = (query + ' ' + response).toLowerCase();
+      
+      // Time series or trend analysis
+      if (combinedText.includes('trend') || 
+          combinedText.includes('over time') || 
+          combinedText.includes('timeline') ||
+          combinedText.includes('progression')) {
+        return {
+          chartType: 'line',
+          chartTitle: 'Trend Analysis',
+          chartSubtitle: 'Data progression over time'
+        };
+      }
+      
+      // Distribution or comparison
+      if (combinedText.includes('distribution') || 
+          combinedText.includes('compare') || 
+          combinedText.includes('comparison') ||
+          combinedText.includes('breakdown')) {
+        return {
+          chartType: 'bar',
+          chartTitle: 'Data Distribution',
+          chartSubtitle: 'Comparative analysis'
+        };
+      }
+      
+      // Proportion or composition
+      if (combinedText.includes('percentage') || 
+          combinedText.includes('proportion') || 
+          combinedText.includes('composition') ||
+          combinedText.includes('share')) {
+        return {
+          chartType: 'pie',
+          chartTitle: 'Data Composition',
+          chartSubtitle: 'Proportional breakdown'
+        };
+      }
+      
+      // Default to bar chart for numeric data, pie for categorical
+      const firstDataPoint = data[0];
+      const firstValue = firstDataPoint ? Object.values(firstDataPoint)[0] : null;
+      const isNumeric = typeof firstValue === 'number';
+      
+      return {
+        chartType: isNumeric ? 'bar' : 'pie',
+        chartTitle: isNumeric ? 'Numeric Analysis' : 'Category Distribution',
+        chartSubtitle: `Analysis based on ${isNumeric ? 'numeric values' : 'categories'}`
+      };
+    };
+
+    // Determine chart type and metadata based on context
+    const chartContext = determineChartTypeFromContext(query, parsedResponse.answer, data);
+
+    // Create the result object with enhanced chart information
     const result: AnalysisResult = {
-      answer: parsedResponse.answer.replace(/```sql\n[\s\S]*?\n```/g, '').trim(), // Remove SQL code blocks
+      answer: parsedResponse.answer.replace(/```sql\n[\s\S]*?\n```/g, '').trim(),
       sqlQuery: sqlQuery,
       needsChart: parsedResponse.answer.toLowerCase().includes('visualiz') || 
                  parsedResponse.answer.toLowerCase().includes('chart') ||
                  parsedResponse.visualization !== null,
-      chartType: determineChartType(parsedResponse.answer),
-      chartDataColumn: determineChartColumn(parsedResponse.answer, schema.columns)
+      chartType: chartContext.chartType,
+      chartDataColumn: determineChartColumn(parsedResponse.answer, schema.columns),
+      chartTitle: chartContext.chartTitle,
+      chartSubtitle: chartContext.chartSubtitle
     };
 
     // Add chart data if needed
