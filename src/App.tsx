@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Upload, Database, FileSpreadsheet, PieChart, Download, Send, Table, ChevronLeft, ChevronRight, Moon, Sun, Copy, Check, BarChart, LineChart, Mic, MicOff, Volume1, Volume2, Book, Home, User, LogIn, Minimize, Maximize, Settings, HelpCircle, Share2, Loader } from 'lucide-react';
+import { Upload, Database, FileSpreadsheet, PieChart, Download, Send, Table, ChevronLeft, ChevronRight, Moon, Sun, Copy, Check, BarChart, LineChart, Mic, MicOff, Volume1, Volume2, Book, Home, User, LogIn } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import ChartComponent from './components/ChartComponent';
 import jsPDF from 'jspdf';
@@ -7,8 +7,6 @@ import html2canvas from 'html2canvas';
 import { analyzeData, DataSchema } from './utils/api';
 import DataVisualization from './components/DataVisualization';
 import Education from './components/Education';
-import { useLanguage } from './contexts/LanguageContext';
-import LanguageSelector from './components/LanguageSelector';
 import { analyzeDataWithAI } from './utils/gemini';
 import { parseCSVToJSON } from './utils/csvParser';
 import Auth from './components/Auth';
@@ -237,7 +235,6 @@ const convertExcelToSQL = (tableName: string, schema: DataSchema, data: any[], s
   return `${createTableQuery}${insertQueries}\n`;
 };
 
-// Add mobile navigation state
 function App() {
   const [uploadedFile, setUploadedFile] = useState<File | null>(null);
   const [query, setQuery] = useState('');
@@ -272,21 +269,8 @@ function App() {
   const [showAuth, setShowAuth] = useState(false);
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [showLandingPage, setShowLandingPage] = useState(true);
-  const { t, language } = useLanguage();
+  const [isGuest, setIsGuest] = useState(false);
   const { user, loading, isAuthenticated: authIsAuthenticated } = useAuth();
-  const [isPanelCollapsed, setIsPanelCollapsed] = useState({
-    dataInput: false,
-    conversation: false,
-    visualization: false,
-    results: false
-  });
-  const [loadingStates, setLoadingStates] = useState({
-    chart: false,
-    export: false,
-    query: false
-  });
-  const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
-  const [activePanel, setActivePanel] = useState<'data' | 'query' | 'visualization' | 'results'>('data');
 
   useEffect(() => {
     const timer = setTimeout(() => {
@@ -349,34 +333,6 @@ function App() {
         setIsListening(false);
       }
     };
-  }, []);
-
-  // Add keyboard shortcuts
-  useEffect(() => {
-    const handleKeyPress = (e: KeyboardEvent) => {
-      // Ctrl/Cmd + / for help
-      if ((e.ctrlKey || e.metaKey) && e.key === '/') {
-        e.preventDefault();
-        setShowEducation(true);
-      }
-      // Ctrl/Cmd + S for save/export
-      if ((e.ctrlKey || e.metaKey) && e.key === 's') {
-        e.preventDefault();
-        generatePDF();
-      }
-      // Esc to collapse all panels
-      if (e.key === 'Escape') {
-        setIsPanelCollapsed({
-          dataInput: true,
-          conversation: true,
-          visualization: true,
-          results: true
-        });
-      }
-    };
-
-    window.addEventListener('keydown', handleKeyPress);
-    return () => window.removeEventListener('keydown', handleKeyPress);
   }, []);
 
   const copyRowToClipboard = async (row: any, rowIndex: number) => {
@@ -493,18 +449,14 @@ function App() {
     e.preventDefault();
     if (!data.length || !query.trim() || isAnalyzing) return;
 
-    setLoadingStates(prev => ({ ...prev, query: true }));
-    try {
-      // Add user's question to conversation history first
-      const userQuestion = query.trim();
-      setConversation(prev => [...prev, {
-        role: 'user',
-        content: userQuestion
-      }]);
+    const newMessage = { role: 'user' as const, content: query };
+    setConversation(prev => [...prev, newMessage]);
+    setIsAnalyzing(true);
 
+    try {
       // Handle greeting messages directly without calling LLM
       const greetings = ['hi', 'hello', 'hey', 'greetings'];
-      if (greetings.includes(userQuestion.toLowerCase())) {
+      if (greetings.includes(query.toLowerCase().trim())) {
         const greetingResponse = {
           role: 'assistant' as const,
           content: "Hello! I'm your data analysis assistant. You can ask me questions about your data, and I'll help you analyze it. For example, try asking about specific columns, averages, trends, or distributions in your data."
@@ -579,214 +531,209 @@ function App() {
         chartDataColumn: ''
       });
     } finally {
-      setLoadingStates(prev => ({ ...prev, query: false }));
+      setIsAnalyzing(false);
     }
   };
 
   // Update generatePDF function
   const generatePDF = async () => {
-    setLoadingStates(prev => ({ ...prev, export: true }));
-    try {
-      if (!resultsRef.current) return;
-      
-      const pdf = new jsPDF({
-        orientation: 'portrait',
-        unit: 'mm',
-        format: 'a4',
-        compress: true
-      }) as any;
+    if (!resultsRef.current) return;
+    
+    const pdf = new jsPDF({
+      orientation: 'portrait',
+      unit: 'mm',
+      format: 'a4',
+      compress: true
+    }) as any;
 
-      // Add decorative header
-      pdf.setFillColor(66, 102, 241);
-      pdf.rect(0, 0, pdf.internal.pageSize.getWidth(), 40, 'F');
+    // Add decorative header
+    pdf.setFillColor(66, 102, 241);
+    pdf.rect(0, 0, pdf.internal.pageSize.getWidth(), 40, 'F');
 
-      // Add logo-like design
-      pdf.setTextColor(255, 255, 255);
-      pdf.setFont("helvetica", "bold");
-      pdf.setFontSize(24);
-      pdf.text(t('dataQueryAI'), 20, 25);
+    // Add logo-like design
+    pdf.setTextColor(255, 255, 255);
+    pdf.setFont("helvetica", "bold");
+    pdf.setFontSize(24);
+    pdf.text('DataQuery AI', 20, 25);
 
-      // Add subtitle
-      pdf.setFontSize(14);
-      pdf.text(t('analyzeData'), 20, 35);
-      
-      const pageWidth = pdf.internal.pageSize.getWidth();
-      const pageHeight = pdf.internal.pageSize.getHeight();
-      const margin = 20;
-      const contentWidth = pageWidth - (2 * margin);
-      
-      let yOffset = 50;
+    // Add subtitle
+    pdf.setFontSize(14);
+    pdf.text('Analyze and Visualize Your Data', 20, 35);
+    
+    const pageWidth = pdf.internal.pageSize.getWidth();
+    const pageHeight = pdf.internal.pageSize.getHeight();
+    const margin = 20;
+    const contentWidth = pageWidth - (2 * margin);
+    
+    let yOffset = 50;
 
-      // Add decorative line
+    // Add decorative line
+    pdf.setDrawColor(66, 102, 241);
+    pdf.setLineWidth(0.5);
+    pdf.line(margin, yOffset, pageWidth - margin, yOffset);
+    yOffset += 10;
+
+    // Add date and time
+    const now = new Date();
+    const dateStr = now.toLocaleDateString('en-US', { 
+      year: 'numeric', 
+      month: 'long', 
+      day: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit'
+    });
+    pdf.setTextColor(0, 0, 0);
+    pdf.setFontSize(10);
+    pdf.text(`Generated: ${dateStr}`, margin, yOffset);
+    yOffset += 15;
+
+    // Helper function to draw section box with improved design
+    const drawSectionBox = (startY: number, height: number, title: string) => {
       pdf.setDrawColor(66, 102, 241);
       pdf.setLineWidth(0.5);
-      pdf.line(margin, yOffset, pageWidth - margin, yOffset);
-      yOffset += 10;
-
-      // Add date and time with proper localization
-      const now = new Date();
-      const dateStr = now.toLocaleDateString(language === 'en' ? 'en-US' : language === 'hi' ? 'hi-IN' : 'mr-IN', { 
-        year: 'numeric', 
-        month: 'long', 
-        day: 'numeric',
-        hour: '2-digit',
-        minute: '2-digit'
-      });
+      pdf.rect(margin, startY, contentWidth, height, 'S');
+      
+      // Add section title background
+      pdf.setFillColor(240, 242, 255);
+      pdf.rect(margin, startY, contentWidth, 12, 'F');
+      
+      // Add section title
+      pdf.setFont("helvetica", "bold");
+      pdf.setTextColor(66, 102, 241);
+      pdf.setFontSize(14);
+      pdf.text(title, margin + 5, startY + 9);
+      
+      // Reset styles
+      pdf.setFont("helvetica", "normal");
       pdf.setTextColor(0, 0, 0);
-      pdf.setFontSize(10);
-      pdf.text(`${t('generated')}: ${dateStr}`, margin, yOffset);
-      yOffset += 15;
+      pdf.setFontSize(12);
+    };
 
-      // Helper function to draw section box with improved design
-      const drawSectionBox = (startY: number, height: number, title: string) => {
-        pdf.setDrawColor(66, 102, 241);
-        pdf.setLineWidth(0.5);
-        pdf.rect(margin, startY, contentWidth, height, 'S');
+    // Add conversation history section
+    const conversationHeight = Math.min(conversation.length * 15 + 20, pageHeight / 2);
+    drawSectionBox(yOffset, conversationHeight, 'Conversation History');
+    yOffset += 20;
+    
+    conversation.forEach((message) => {
+      const role = message.role === 'user' ? 'User' : 'Assistant';
+      const content = message.content;
+      
+      if (yOffset + 20 > pageHeight - margin) {
+        // Add page number before creating new page
+        pdf.setFontSize(10);
+        pdf.text(`${pdf.internal.getNumberOfPages()}`, pageWidth - 25, pageHeight - 10);
         
-        // Add section title background
-        pdf.setFillColor(240, 242, 255);
-        pdf.rect(margin, startY, contentWidth, 12, 'F');
-        
-        // Add section title
-        pdf.setFont("helvetica", "bold");
-        pdf.setTextColor(66, 102, 241);
-        pdf.setFontSize(14);
-        pdf.text(title, margin + 5, startY + 9);
-        
-        // Reset styles
-        pdf.setFont("helvetica", "normal");
-        pdf.setTextColor(0, 0, 0);
+        pdf.addPage();
+        // Add header to new page
+        pdf.setFillColor(66, 102, 241);
+        pdf.rect(0, 0, pageWidth, 20, 'F');
+        pdf.setTextColor(255, 255, 255);
         pdf.setFontSize(12);
-      };
+        pdf.text('DataQuery AI', 20, 13);
+        
+        yOffset = 40;
+      }
 
-      // Add conversation history section
-      const conversationHeight = Math.min(conversation.length * 15 + 20, pageHeight / 2);
-      drawSectionBox(yOffset, conversationHeight, t('conversationHistory'));
+      pdf.setFontSize(10);
+      const lines = pdf.splitTextToSize(`${role}: ${content}`, contentWidth - 10);
+      pdf.text(lines, margin + 5, yOffset + 10);
+      yOffset += (lines.length * 5) + 5;
+    });
+
+    yOffset += 10;
+
+    // Add Results section
+    if (queryResult?.sqlQuery) {
+      if (yOffset + 60 > pageHeight - margin) {
+        pdf.addPage();
+        yOffset = margin;
+      }
+
+      const resultsHeight = 50;
+      drawSectionBox(yOffset, resultsHeight, 'Results');
       yOffset += 20;
       
-      conversation.forEach((message) => {
-        const role = message.role === 'user' ? t('user') : t('assistant');
-        const content = message.content;
-        
-        if (yOffset + 20 > pageHeight - margin) {
-          // Add page number before creating new page
-          pdf.setFontSize(10);
-          pdf.text(`${pdf.internal.getNumberOfPages()}`, pageWidth - 25, pageHeight - 10);
-          
-          pdf.addPage();
-          // Add header to new page
-          pdf.setFillColor(66, 102, 241);
-          pdf.rect(0, 0, pageWidth, 20, 'F');
-          pdf.setTextColor(255, 255, 255);
-          pdf.setFontSize(12);
-          pdf.text(t('dataQueryAI'), 20, 13);
-          
-          yOffset = 40;
-        }
-
-        pdf.setFontSize(10);
-        const lines = pdf.splitTextToSize(`${role}: ${content}`, contentWidth - 10);
-        pdf.text(lines, margin + 5, yOffset + 10);
-        yOffset += (lines.length * 5) + 5;
-      });
-
-      yOffset += 10;
-
-      // Add Results section
-      if (queryResult?.sqlQuery) {
-        if (yOffset + 60 > pageHeight - margin) {
-          pdf.addPage();
-          yOffset = margin;
-        }
-
-        const resultsHeight = 50;
-        drawSectionBox(yOffset, resultsHeight, t('results'));
-        yOffset += 20;
-        
-        pdf.setFontSize(10);
-        const queryLines = pdf.splitTextToSize(queryResult.sqlQuery, contentWidth - 10);
-        pdf.text(queryLines, margin + 5, yOffset + 10);
-        yOffset += (queryLines.length * 5) + 10;
-      }
-
-      // Add Visualization section with improved design
-      if (queryResult?.needsChart || selectedColumn) {
-        if (yOffset + 180 > pageHeight - margin) {
-          pdf.addPage();
-          yOffset = margin;
-        }
-
-        const chartDataRows = queryResult?.chartData ? Math.ceil(queryResult.chartData.length / 3) : 0;
-        const chartDataHeight = chartDataRows * 4 + 10;
-        const visualizationHeight = 160 + chartDataHeight;
-
-        drawSectionBox(yOffset, visualizationHeight, t('dataVisualize'));
-        yOffset += 20;
-
-        const chartContainer = document.querySelector('.w-full.h-\\[400px\\]') as HTMLElement;
-        if (chartContainer) {
-          try {
-            // Wait for chart animations to complete
-            await new Promise(resolve => setTimeout(resolve, 1000));
-
-            const originalStyle = chartContainer.style.cssText;
-            chartContainer.style.height = '400px';
-            chartContainer.style.width = '100%';
-            chartContainer.style.backgroundColor = '#FFFFFF';
-
-            const canvas = await html2canvas(chartContainer, {
-              backgroundColor: '#FFFFFF',
-              scale: 2,
-              logging: false,
-              useCORS: true,
-              allowTaint: true
-            });
-
-            chartContainer.style.cssText = originalStyle;
-
-            const imgData = canvas.toDataURL('image/png');
-            const imgWidth = contentWidth * 0.9;
-            const imgHeight = (canvas.height * imgWidth) / canvas.width;
-            
-            const xOffset = margin + (contentWidth - imgWidth) / 2;
-            pdf.addImage(imgData, 'PNG', xOffset, yOffset + 5, imgWidth, imgHeight);
-            yOffset += imgHeight + 15;
-
-            // Add chart data labels in a grid layout
-            if (queryResult?.chartData) {
-              pdf.setFontSize(8);
-              const labelWidth = Math.floor(contentWidth / 3);
-              const labelHeight = 4;
-              
-              queryResult.chartData.forEach((item, index) => {
-                const column = index % 3;
-                const row = Math.floor(index / 3);
-                const x = margin + 5 + (column * labelWidth);
-                const y = yOffset + (row * labelHeight);
-                
-                const label = `${item.name}: ${item.value}`;
-                pdf.text(label, x, y);
-              });
-            }
-          } catch (error) {
-            console.error('Error capturing chart:', error);
-          }
-        }
-      }
-
-      // Add page numbers to all pages
-      const totalPages = pdf.internal.getNumberOfPages();
-      for (let i = 1; i <= totalPages; i++) {
-        pdf.setPage(i);
-        pdf.setFontSize(10);
-        pdf.setTextColor(0, 0, 0);
-        pdf.text(`${t('page')} ${i} ${t('of')} ${totalPages}`, pageWidth - 50, pageHeight - 10);
-      }
-
-      pdf.save(`data-query-report-${language}-${new Date().getTime()}.pdf`);
-    } finally {
-      setLoadingStates(prev => ({ ...prev, export: false }));
+      pdf.setFontSize(10);
+      const queryLines = pdf.splitTextToSize(queryResult.sqlQuery, contentWidth - 10);
+      pdf.text(queryLines, margin + 5, yOffset + 10);
+      yOffset += (queryLines.length * 5) + 10;
     }
+
+    // Add Visualization section with improved design
+    if (queryResult?.needsChart || selectedColumn) {
+      if (yOffset + 180 > pageHeight - margin) {
+        pdf.addPage();
+        yOffset = margin;
+      }
+
+      const chartDataRows = queryResult?.chartData ? Math.ceil(queryResult.chartData.length / 3) : 0;
+      const chartDataHeight = chartDataRows * 4 + 10;
+      const visualizationHeight = 160 + chartDataHeight;
+
+      drawSectionBox(yOffset, visualizationHeight, 'Data Visualization');
+      yOffset += 20;
+
+      const chartContainer = document.querySelector('.w-full.h-\\[400px\\]') as HTMLElement;
+      if (chartContainer) {
+        try {
+          // Wait for chart animations to complete
+          await new Promise(resolve => setTimeout(resolve, 1000));
+
+          const originalStyle = chartContainer.style.cssText;
+          chartContainer.style.height = '400px';
+          chartContainer.style.width = '100%';
+          chartContainer.style.backgroundColor = '#FFFFFF';
+
+          const canvas = await html2canvas(chartContainer, {
+            backgroundColor: '#FFFFFF',
+            scale: 2,
+            logging: false,
+            useCORS: true,
+            allowTaint: true
+          });
+
+          chartContainer.style.cssText = originalStyle;
+
+          const imgData = canvas.toDataURL('image/png');
+          const imgWidth = contentWidth * 0.9;
+          const imgHeight = (canvas.height * imgWidth) / canvas.width;
+          
+          const xOffset = margin + (contentWidth - imgWidth) / 2;
+          pdf.addImage(imgData, 'PNG', xOffset, yOffset + 5, imgWidth, imgHeight);
+          yOffset += imgHeight + 15;
+
+          // Add chart data labels in a grid layout
+          if (queryResult?.chartData) {
+            pdf.setFontSize(8);
+            const labelWidth = Math.floor(contentWidth / 3);
+            const labelHeight = 4;
+            
+            queryResult.chartData.forEach((item, index) => {
+              const column = index % 3;
+              const row = Math.floor(index / 3);
+              const x = margin + 5 + (column * labelWidth);
+              const y = yOffset + (row * labelHeight);
+              
+              const label = `${item.name}: ${item.value}`;
+              pdf.text(label, x, y);
+            });
+          }
+        } catch (error) {
+          console.error('Error capturing chart:', error);
+        }
+      }
+    }
+
+    // Add page numbers to all pages
+    const totalPages = pdf.internal.getNumberOfPages();
+    for (let i = 1; i <= totalPages; i++) {
+      pdf.setPage(i);
+      pdf.setFontSize(10);
+      pdf.setTextColor(0, 0, 0);
+      pdf.text(`Page ${i} of ${totalPages}`, pageWidth - 50, pageHeight - 10);
+    }
+
+    pdf.save('data-query-report.pdf');
   };
 
   const totalPages = Math.ceil(data.length / rowsPerPage);
@@ -803,7 +750,7 @@ function App() {
             {chartType === 'bar' && <BarChart className={`h-8 w-8 mx-auto ${darkMode ? 'text-gray-600' : 'text-indigo-400'}`} />}
             {chartType === 'line' && <LineChart className={`h-8 w-8 mx-auto ${darkMode ? 'text-gray-600' : 'text-indigo-400'}`} />}
             <p className={`text-sm ${darkMode ? 'text-gray-400' : 'text-gray-600'}`}>
-              {t('noDataToVisualize')}
+              No data to visualize
             </p>
           </div>
         </div>
@@ -935,6 +882,7 @@ function App() {
   // Handle guest access
   const handleGuestAccess = () => {
     setShowLandingPage(false);
+    setIsGuest(true);
   };
 
   // Add sign out handler
@@ -947,174 +895,36 @@ function App() {
     }
   };
 
-  const togglePanel = (panelName: keyof typeof isPanelCollapsed) => {
-    setIsPanelCollapsed(prev => ({
-      ...prev,
-      [panelName]: !prev[panelName]
-    }));
-  };
-
   // Show landing page if not authenticated
   if (!loading && !authIsAuthenticated && showLandingPage) {
     return <LandingPage darkMode={darkMode} onGuestAccess={handleGuestAccess} />;
   }
 
-  // Add quick action toolbar component
-  const QuickActionToolbar = () => (
-    <div className={`fixed bottom-4 left-1/2 transform -translate-x-1/2 px-4 py-2 rounded-full shadow-lg flex items-center space-x-2 ${
-      darkMode ? 'bg-gray-800 border-gray-700' : 'bg-white border-gray-200'
-    } border`}>
-      <button
-        onClick={() => setShowEducation(true)}
-        className={`p-2 rounded-full transition-colors ${
-          darkMode ? 'hover:bg-gray-700' : 'hover:bg-gray-100'
-        }`}
-        title={`Help (${navigator.platform.includes('Mac') ? '⌘' : 'Ctrl'} + /)`}
-      >
-        <HelpCircle className={`h-5 w-5 ${darkMode ? 'text-gray-400' : 'text-gray-600'}`} />
-      </button>
-
-      <button
-        onClick={() => generatePDF()}
-        className={`p-2 rounded-full transition-colors ${
-          darkMode ? 'hover:bg-gray-700' : 'hover:bg-gray-100'
-        }`}
-        title={`Export (${navigator.platform.includes('Mac') ? '⌘' : 'Ctrl'} + S)`}
-      >
-        <Download className={`h-5 w-5 ${darkMode ? 'text-gray-400' : 'text-gray-600'}`} />
-      </button>
-
-      <button
-        onClick={() => {/* Add share functionality */}}
-        className={`p-2 rounded-full transition-colors ${
-          darkMode ? 'hover:bg-gray-700' : 'hover:bg-gray-100'
-        }`}
-        title="Share"
-      >
-        <Share2 className={`h-5 w-5 ${darkMode ? 'text-gray-400' : 'text-gray-600'}`} />
-      </button>
-
-      <button
-        onClick={() => {/* Add settings functionality */}}
-        className={`p-2 rounded-full transition-colors ${
-          darkMode ? 'hover:bg-gray-700' : 'hover:bg-gray-100'
-        }`}
-        title="Settings"
-      >
-        <Settings className={`h-5 w-5 ${darkMode ? 'text-gray-400' : 'text-gray-600'}`} />
-      </button>
-    </div>
-  );
-
-  // Add loading animation component
-  const LoadingSpinner = ({ size = 'small' }: { size?: 'small' | 'medium' | 'large' }) => {
-    const sizeClasses = {
-      small: 'h-4 w-4',
-      medium: 'h-6 w-6',
-      large: 'h-8 w-8'
-    };
-
-    return (
-      <Loader className={`${sizeClasses[size]} animate-spin`} />
-    );
-  };
-
-  // Add mobile navigation component
-  const MobileNavigation = () => (
-    <div className={`fixed bottom-0 left-0 right-0 bg-${darkMode ? 'gray-800' : 'white'} border-t ${darkMode ? 'border-gray-700' : 'border-gray-200'} lg:hidden`}>
-      <div className="flex justify-around items-center p-2">
-        <button
-          onClick={() => setActivePanel('data')}
-          className={`flex flex-col items-center p-2 rounded-lg ${
-            activePanel === 'data'
-              ? darkMode
-                ? 'bg-gray-700 text-white'
-                : 'bg-indigo-50 text-indigo-600'
-              : darkMode
-                ? 'text-gray-400'
-                : 'text-gray-600'
-          }`}
-        >
-          <Database className="h-5 w-5" />
-          <span className="text-xs mt-1">Data</span>
-        </button>
-
-        <button
-          onClick={() => setActivePanel('query')}
-          className={`flex flex-col items-center p-2 rounded-lg ${
-            activePanel === 'query'
-              ? darkMode
-                ? 'bg-gray-700 text-white'
-                : 'bg-indigo-50 text-indigo-600'
-              : darkMode
-                ? 'text-gray-400'
-                : 'text-gray-600'
-          }`}
-        >
-          <Send className="h-5 w-5" />
-          <span className="text-xs mt-1">Query</span>
-        </button>
-
-        <button
-          onClick={() => setActivePanel('visualization')}
-          className={`flex flex-col items-center p-2 rounded-lg ${
-            activePanel === 'visualization'
-              ? darkMode
-                ? 'bg-gray-700 text-white'
-                : 'bg-indigo-50 text-indigo-600'
-              : darkMode
-                ? 'text-gray-400'
-                : 'text-gray-600'
-          }`}
-        >
-          <PieChart className="h-5 w-5" />
-          <span className="text-xs mt-1">Charts</span>
-        </button>
-
-        <button
-          onClick={() => setActivePanel('results')}
-          className={`flex flex-col items-center p-2 rounded-lg ${
-            activePanel === 'results'
-              ? darkMode
-                ? 'bg-gray-700 text-white'
-                : 'bg-indigo-50 text-indigo-600'
-              : darkMode
-                ? 'text-gray-400'
-                : 'text-gray-600'
-          }`}
-        >
-          <Table className="h-5 w-5" />
-          <span className="text-xs mt-1">Results</span>
-        </button>
-      </div>
-    </div>
-  );
-
-  // Update main content layout
   return (
     <div className={`min-h-screen ${darkMode ? 'bg-gray-900' : 'bg-gradient-to-br from-indigo-50 via-purple-50 to-pink-50'}`}>
-      <nav className={`${darkMode ? 'bg-gray-800 border-gray-700' : 'bg-white border-indigo-100'} shadow-lg border-b fixed top-0 left-0 right-0 z-50`}>
+      <nav className={`${darkMode ? 'bg-gray-800 border-gray-700' : 'bg-white border-indigo-100'} shadow-lg border-b fixed top-0 left-0 right-0 z-[1000]`}>
         <div className="max-w-7xl mx-auto px-2 sm:px-6 lg:px-8 py-2 sm:py-4">
           <div className="flex flex-col sm:flex-row sm:items-center justify-between space-y-2 sm:space-y-0">
             <div className="flex items-center space-x-3">
               <Database className={`h-6 w-6 sm:h-8 sm:w-8 ${darkMode ? 'text-indigo-400' : 'text-indigo-600'}`} />
               <div>
                 <h1 className={`text-xl sm:text-2xl font-bold ${darkMode ? 'text-white' : 'text-gray-900'}`}>
-                  {t('dataQueryAI')}
+                  DataQuery AI
                 </h1>
                 <p className={`text-xs sm:text-sm ${darkMode ? 'text-gray-400' : 'text-gray-500'}`}>
-                  {t('analyzeData')}
+                  Analyze and Visualize Your Data
                 </p>
               </div>
             </div>
             <div className="flex flex-wrap items-center gap-2">
-              <LanguageSelector darkMode={darkMode} />
-              {user && (
+              {(user || isGuest) && (
                 <div className={`flex items-center space-x-2 px-2 sm:px-4 py-1 sm:py-2 rounded-lg text-xs sm:text-sm ${
                   darkMode ? 'bg-gray-700 text-gray-200' : 'bg-gray-100 text-gray-600'
                 }`}>
                   <User className="h-3 w-3 sm:h-4 sm:w-4" />
-                  <span className="font-medium truncate max-w-[120px] sm:max-w-none">{user.displayName || user.email}</span>
+                  <span className="font-medium truncate max-w-[120px] sm:max-w-none">
+                    {isGuest ? 'Guest' : (user?.displayName || user?.email)}
+                  </span>
                 </div>
               )}
               <div className="flex items-center gap-2">
@@ -1127,7 +937,7 @@ function App() {
                   }`}
                 >
                   <Home className="h-3 w-3 sm:h-4 sm:w-4 mr-1 sm:mr-2" />
-                  {t('home')}
+                  Home
                 </button>
                 <button
                   onClick={() => setShowEducation(!showEducation)}
@@ -1138,94 +948,76 @@ function App() {
                   }`}
                 >
                   <Book className="h-3 w-3 sm:h-4 sm:w-4 mr-1 sm:mr-2" />
-                  {t('learn')}
+                  Learn
                 </button>
-                {authIsAuthenticated && (
+                {(authIsAuthenticated || isGuest) && (
                   <button
                     onClick={handleSignOut}
-                    className={`flex items-center px-2 sm:px-4 py-1 sm:py-2 rounded-lg text-xs sm:text-sm font-medium ${
+                    className={`p-2 rounded-lg ${
                       darkMode
-                        ? 'bg-indigo-600 hover:bg-indigo-700 text-white'
-                        : 'bg-indigo-600 hover:bg-indigo-700 text-white'
+                        ? 'bg-gray-700 hover:bg-gray-600 text-gray-200'
+                        : 'bg-gray-100 hover:bg-gray-200 text-gray-600'
                     }`}
+                    title="Sign Out"
                   >
-                    <LogIn className="h-3 w-3 sm:h-4 sm:w-4 mr-1 sm:mr-2" />
-                    {t('signOut')}
+                    <LogIn className="h-4 w-4" />
                   </button>
                 )}
+                <button
+                  onClick={() => setDarkMode(!darkMode)}
+                  className={`p-1 sm:p-2 rounded-lg ${darkMode ? 'bg-gray-700 text-gray-200' : 'bg-gray-100 text-gray-600'} hover:opacity-80`}
+                >
+                  {darkMode ? <Sun className="h-4 w-4 sm:h-5 sm:w-5" /> : <Moon className="h-4 w-4 sm:h-5 sm:w-5" />}
+                </button>
               </div>
-              <button
-                onClick={() => setDarkMode(!darkMode)}
-                className={`p-1 sm:p-2 rounded-lg ${darkMode ? 'bg-gray-700 text-gray-200' : 'bg-gray-100 text-gray-600'} hover:opacity-80`}
-              >
-                {darkMode ? <Sun className="h-4 w-4 sm:h-5 sm:w-5" /> : <Moon className="h-4 w-4 sm:h-5 sm:w-5" />}
-              </button>
             </div>
           </div>
         </div>
       </nav>
 
       {showEducation ? (
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 mt-[120px] sm:mt-[80px]">
           <Education darkMode={darkMode} />
         </div>
       ) : (
-        <main className="max-w-7xl mx-auto px-2 sm:px-6 lg:px-8 py-2 sm:py-8 mt-[120px] sm:mt-[80px] pb-16 lg:pb-8">
-          {/* Desktop Layout */}
-          <div className="hidden lg:grid grid-cols-2 gap-8">
+        <main className="max-w-7xl mx-auto px-2 sm:px-6 lg:px-8 py-2 sm:py-8 mt-[120px] sm:mt-[80px]">
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-2 sm:gap-8">
             {/* Left Column */}
             <div className="space-y-2 sm:space-y-6">
-              {/* Data Input Panel */}
-              <div className={`${darkMode ? 'bg-gray-800 border-gray-700' : 'bg-white border-indigo-100'} rounded-xl shadow-sm border p-3 sm:p-6 transition-all duration-300`}>
-                <div className="flex items-center justify-between mb-3 sm:mb-4">
-                  <h2 className={`text-base sm:text-lg font-semibold ${darkMode ? 'text-white' : 'text-gray-900'}`}>
+              {/* File Upload */}
+              <div className={`${darkMode ? 'bg-gray-800 border-gray-700' : 'bg-white border-indigo-100'} rounded-xl shadow-sm border p-3 sm:p-6 mt-4 sm:mt-6`}>
+                <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between mb-3 sm:mb-4">
+                  <h2 className={`text-base sm:text-lg font-semibold ${darkMode ? 'text-white' : 'text-gray-900'} mb-2 sm:mb-0`}>
                     Data Input
                   </h2>
-                  <button
-                    onClick={() => togglePanel('dataInput')}
-                    className={`p-1 rounded-lg transition-colors ${
-                      darkMode ? 'hover:bg-gray-700' : 'hover:bg-gray-100'
-                    }`}
-                    title={isPanelCollapsed.dataInput ? 'Expand' : 'Collapse'}
-                  >
-                    {isPanelCollapsed.dataInput ? (
-                      <Maximize className={`h-4 w-4 ${darkMode ? 'text-gray-400' : 'text-gray-600'}`} />
-                    ) : (
-                      <Minimize className={`h-4 w-4 ${darkMode ? 'text-gray-400' : 'text-gray-600'}`} />
-                    )}
-                  </button>
+                  {uploadedFile && (
+                    <span className={`text-xs sm:text-sm flex items-center px-2 sm:px-3 py-1 rounded-full ${darkMode ? 'bg-gray-700 text-indigo-400' : 'bg-indigo-50 text-indigo-600'}`}>
+                      <FileSpreadsheet className="h-3 w-3 sm:h-4 sm:w-4 mr-1" />
+                      {uploadedFile.name}
+                    </span>
+                  )}
                 </div>
-                <div className={`transition-all duration-300 ${isPanelCollapsed.dataInput ? 'h-0 overflow-hidden' : 'h-auto'}`}>
-                  <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between mb-3 sm:mb-4">
-                    {uploadedFile && (
-                      <span className={`text-xs sm:text-sm flex items-center px-2 sm:px-3 py-1 rounded-full ${darkMode ? 'bg-gray-700 text-indigo-400' : 'bg-indigo-50 text-indigo-600'}`}>
-                        <FileSpreadsheet className="h-3 w-3 sm:h-4 sm:w-4 mr-1" />
-                        {uploadedFile.name}
-                      </span>
-                    )}
+                <label className={`flex flex-col items-center justify-center w-full h-24 sm:h-32 border-2 border-dashed rounded-xl cursor-pointer transition-colors ${
+                  darkMode 
+                    ? 'border-gray-600 hover:bg-gray-700' 
+                    : 'border-indigo-200 hover:bg-indigo-50'
+                }`}>
+                  <div className="flex flex-col items-center justify-center pt-4 sm:pt-5 pb-4 sm:pb-6">
+                    <Upload className={`h-6 w-6 sm:h-8 sm:w-8 mb-1 sm:mb-2 ${darkMode ? 'text-gray-400' : 'text-indigo-400'}`} />
+                    <p className={`text-xs sm:text-sm font-medium ${darkMode ? 'text-gray-200' : 'text-indigo-600'}`}>
+                      Upload your Excel or CSV file
+                    </p>
+                    <p className={`text-xs ${darkMode ? 'text-gray-400' : 'text-gray-500'} mt-1`}>
+                      Drag and drop or click to browse
+                    </p>
                   </div>
-                  <label className={`flex flex-col items-center justify-center w-full h-24 sm:h-32 border-2 border-dashed rounded-xl cursor-pointer transition-colors ${
-                    darkMode 
-                      ? 'border-gray-600 hover:bg-gray-700' 
-                      : 'border-indigo-200 hover:bg-indigo-50'
-                  }`}>
-                    <div className="flex flex-col items-center justify-center pt-4 sm:pt-5 pb-4 sm:pb-6">
-                      <Upload className={`h-6 w-6 sm:h-8 sm:w-8 mb-1 sm:mb-2 ${darkMode ? 'text-gray-400' : 'text-indigo-400'}`} />
-                      <p className={`text-xs sm:text-sm font-medium ${darkMode ? 'text-gray-200' : 'text-indigo-600'}`}>
-                        Upload your Excel or CSV file
-                      </p>
-                      <p className={`text-xs ${darkMode ? 'text-gray-400' : 'text-gray-500'} mt-1`}>
-                        Drag and drop or click to browse
-                      </p>
-                    </div>
-                    <input
-                      type="file"
-                      className="hidden"
-                      accept=".csv,.xlsx,.xls"
-                      onChange={handleFileUpload}
-                    />
-                  </label>
-                </div>
+                  <input
+                    type="file"
+                    className="hidden"
+                    accept=".csv,.xlsx,.xls"
+                    onChange={handleFileUpload}
+                  />
+                </label>
               </div>
 
               {/* Schema and Data Preview */}
@@ -1241,7 +1033,7 @@ function App() {
                   {/* Schema Table */}
                   <div className="mb-6">
                     <h3 className={`text-sm font-medium ${darkMode ? 'text-gray-300' : 'text-gray-500'} mb-2`}>
-                      {t('columnDefinitions')}
+                      Column Definitions
                     </h3>
                     <div className={`${darkMode ? 'bg-gray-900' : 'bg-gray-50'} rounded-lg p-4`}>
                       <div className="overflow-x-auto">
@@ -1249,10 +1041,10 @@ function App() {
                           <thead>
                             <tr>
                               <th className={`px-4 py-2 text-left text-xs font-medium ${darkMode ? 'text-gray-400' : 'text-gray-500'} uppercase tracking-wider`}>
-                                {t('column')}
+                                Column
                               </th>
                               <th className={`px-4 py-2 text-left text-xs font-medium ${darkMode ? 'text-gray-400' : 'text-gray-500'} uppercase tracking-wider`}>
-                                {t('type')}
+                                Type
                               </th>
                             </tr>
                           </thead>
@@ -1282,14 +1074,14 @@ function App() {
                   {/* Data Preview */}
                   <div>
                     <h3 className={`text-sm font-medium ${darkMode ? 'text-gray-300' : 'text-gray-500'} mb-2`}>
-                      {t('dataPreview')}
+                      Data Preview
                     </h3>
                     <div className={`overflow-x-auto ${darkMode ? 'bg-gray-900' : 'bg-gray-50'} rounded-lg p-4`}>
                       <table className="min-w-full divide-y divide-gray-200">
                         <thead>
                           <tr>
                             <th className={`px-4 py-2 text-left text-xs font-medium ${darkMode ? 'text-gray-400' : 'text-gray-500'} uppercase tracking-wider w-10`}>
-                              {t('actions')}
+                              Actions
                             </th>
                             {schema.columns.map((column, index) => (
                               <th
@@ -1312,7 +1104,7 @@ function App() {
                                       ? 'hover:bg-gray-700 focus:bg-gray-700' 
                                       : 'hover:bg-gray-200 focus:bg-gray-200'
                                   }`}
-                                  title={t('copyRowData')}
+                                  title="Copy Row Data"
                                 >
                                   {copiedRow === rowIndex ? (
                                     <Check className="h-4 w-4 text-green-500" />
@@ -1347,7 +1139,7 @@ function App() {
                             } disabled:opacity-50`}
                           >
                             <ChevronLeft className="h-4 w-4 mr-1" />
-                            {t('previous')}
+                            Previous
                           </button>
                           <div className="flex items-center space-x-1">
                             <input
@@ -1368,7 +1160,7 @@ function App() {
                               } focus:ring-2 focus:ring-indigo-500 focus:border-transparent`}
                             />
                             <span className={`text-sm ${darkMode ? 'text-gray-400' : 'text-gray-500'}`}>
-                              {t('page')} {currentPage} {t('of')} {totalPages}
+                              Page {currentPage} of {totalPages}
                             </span>
                           </div>
                           <button
@@ -1380,7 +1172,7 @@ function App() {
                                 : 'border-gray-300 text-gray-700 bg-white hover:bg-gray-50'
                             } disabled:opacity-50`}
                           >
-                            {t('next')}
+                            Next
                             <ChevronRight className="h-4 w-4 ml-1" />
                           </button>
                         </div>
@@ -1397,7 +1189,7 @@ function App() {
               <div className={`${darkMode ? 'bg-gray-800 border-gray-700' : 'bg-white border-indigo-100'} rounded-xl shadow-sm border p-3 sm:p-6`}>
                 <div className="flex items-center justify-between mb-3 sm:mb-4">
                   <h2 className={`text-base sm:text-lg font-semibold ${darkMode ? 'text-white' : 'text-gray-900'}`}>
-                    {t('conversationHistory')}
+                    Conversation History
                   </h2>
                   {conversation.length > 0 && (
                     <button
@@ -1410,7 +1202,7 @@ function App() {
                           ? 'bg-gray-700 hover:bg-gray-600 text-gray-200'
                           : 'bg-gray-100 hover:bg-gray-200 text-gray-700'
                       }`}
-                      title={t('clear')}
+                      title="Clear"
                     >
                       <svg 
                         xmlns="http://www.w3.org/2000/svg" 
@@ -1425,7 +1217,7 @@ function App() {
                         <path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8" />
                         <path d="M21 3v5h-5" />
                       </svg>
-                      {t('clear')}
+                      Clear
                     </button>
                   )}
                 </div>
@@ -1454,7 +1246,7 @@ function App() {
                               ? 'hover:bg-gray-600' 
                               : 'hover:bg-gray-200'
                           }`}
-                          title={isSpeaking && speakingMessageIndex === index ? t('stopSpeaking') : t('listenMessage')}
+                          title={isSpeaking && speakingMessageIndex === index ? 'Stop Speaking' : 'Listen Message'}
                         >
                           {isSpeaking && speakingMessageIndex === index ? (
                             <Volume2 className={`h-3 w-3 sm:h-4 sm:w-4 ${darkMode ? 'text-red-400' : 'text-red-600'}`} />
@@ -1469,7 +1261,7 @@ function App() {
                               ? 'hover:bg-gray-600' 
                               : 'hover:bg-gray-200'
                           }`}
-                          title={t('copyMessage')}
+                          title="Copy Message"
                         >
                           {copiedMessage === index ? (
                             <Check className="h-3 w-3 sm:h-4 sm:w-4 text-green-500" />
@@ -1490,7 +1282,7 @@ function App() {
                           ? 'bg-gray-900 text-gray-200 border-gray-600'
                           : 'text-gray-700 border-indigo-200'
                       } border focus:ring-2 focus:ring-indigo-500 focus:border-transparent`}
-                      placeholder={t('queryPlaceholder')}
+                      placeholder="Type your query here..."
                       value={query}
                       onChange={(e) => setQuery(e.target.value)}
                       onKeyDown={(e) => {
@@ -1516,26 +1308,32 @@ function App() {
                               ? 'bg-gray-700 text-gray-300 hover:bg-gray-600'
                               : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
                         }`}
-                        title={isListening ? t('stopVoice') : t('startVoice')}
+                        title={isListening ? 'Stop Voice' : 'Start Voice'}
                         disabled={!recognition}
                       >
                         {isListening ? <MicOff className="h-3 w-3 sm:h-4 sm:w-4" /> : <Mic className="h-3 w-3 sm:h-4 sm:w-4" />}
                       </button>
                       <button
                         type="submit"
-                        disabled={isAnalyzing || !query.trim() || loadingStates.query}
-                        className={`inline-flex items-center px-3 sm:px-4 py-1.5 sm:py-2 border border-transparent text-xs sm:text-sm font-medium rounded-lg shadow-sm transition-all duration-300 ${
+                        disabled={isAnalyzing || !query.trim()}
+                        className={`inline-flex items-center px-3 sm:px-4 py-1.5 sm:py-2 border border-transparent text-xs sm:text-sm font-medium rounded-lg shadow-sm ${
                           darkMode
                             ? 'bg-indigo-600 hover:bg-indigo-700 text-white'
                             : 'bg-indigo-600 hover:bg-indigo-700 text-white'
                         } focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 disabled:opacity-50`}
                       >
-                        {loadingStates.query ? (
-                          <LoadingSpinner size="small" />
+                        {isAnalyzing ? (
+                          <span className="flex items-center">
+                            <svg className="animate-spin -ml-0.5 mr-1.5 h-3 w-3 sm:h-4 sm:w-4 text-white" fill="none" viewBox="0 0 24 24">
+                              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                            </svg>
+                            Analyzing...
+                          </span>
                         ) : (
                           <>
                             <Send className="h-3 w-3 sm:h-4 sm:w-4 mr-1.5 sm:mr-2" />
-                            {t('query')}
+                            Query
                           </>
                         )}
                       </button>
@@ -1547,8 +1345,8 @@ function App() {
               {/* Data Visualization */}
               <div className={`${darkMode ? 'bg-gray-800 border-gray-700' : 'bg-white border-indigo-100'} rounded-xl shadow-sm border p-3 sm:p-6`}>
                 <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between mb-3 sm:mb-4">
-                  <h2 className={`text-base sm:text-lg font-semibold ${darkMode ? 'text-white' : 'text-gray-900'} mb-2 sm:mb-0`}>
-                    {t('dataVisualize')}
+                  <h2 className={`text-base sm:text-lg font-semibold ${darkMode ? 'text-white' : 'text-gray-900'}`}>
+                    Data Visualization
                   </h2>
                   <div className="flex flex-wrap gap-2 w-full sm:w-auto">
                     <button
@@ -1564,7 +1362,7 @@ function App() {
                       }`}
                     >
                       <PieChart className="h-3 w-3 sm:h-4 sm:w-4 inline-block mr-1" />
-                      {t('pieChart')}
+                      Pie Chart
                     </button>
                     <button
                       onClick={() => handleChartTypeChange('bar')}
@@ -1579,7 +1377,7 @@ function App() {
                       }`}
                     >
                       <BarChart className="h-3 w-3 sm:h-4 sm:w-4 inline-block mr-1" />
-                      {t('barChart')}
+                      Bar Chart
                     </button>
                     <button
                       onClick={() => handleChartTypeChange('line')}
@@ -1594,7 +1392,7 @@ function App() {
                       }`}
                     >
                       <LineChart className="h-3 w-3 sm:h-4 sm:w-4 inline-block mr-1" />
-                      {t('lineChart')}
+                      Line Chart
                     </button>
                   </div>
                 </div>
@@ -1603,7 +1401,7 @@ function App() {
                 {schema && schema.columns.length > 0 && (
                   <div className="mb-3 sm:mb-4">
                     <label className={`block text-xs sm:text-sm font-medium mb-1 sm:mb-2 ${darkMode ? 'text-gray-300' : 'text-gray-700'}`}>
-                      {t('selectColumnToVisualize')}
+                      Select Column to Visualize
                     </label>
                     <select
                       value={selectedColumn}
@@ -1641,25 +1439,20 @@ function App() {
               {/* Results */}
               <div className={`${darkMode ? 'bg-gray-800 border-gray-700' : 'bg-white border-indigo-100'} rounded-xl shadow-sm border p-3 sm:p-6`}>
                 <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between mb-3 sm:mb-4">
-                  <h2 className={`text-base sm:text-lg font-semibold ${darkMode ? 'text-white' : 'text-gray-900'} mb-2 sm:mb-0`}>
+                  <h2 className={`text-base sm:text-lg font-semibold ${darkMode ? 'text-white' : 'text-gray-900'}`}>
                     Results
                   </h2>
                   {queryResult && (
                     <div className="w-full sm:w-auto">
                       <button
                         onClick={generatePDF}
-                        disabled={loadingStates.export}
-                        className={`w-full sm:w-auto inline-flex items-center justify-center px-3 sm:px-4 py-1.5 sm:py-2 border text-xs sm:text-sm font-medium rounded-lg transition-all duration-300 ${
+                        className={`w-full sm:w-auto inline-flex items-center justify-center px-3 sm:px-4 py-1.5 sm:py-2 border text-xs sm:text-sm font-medium rounded-lg ${
                           darkMode
                             ? 'border-gray-600 text-gray-200 bg-gray-700 hover:bg-gray-600'
                             : 'border-indigo-200 text-indigo-700 bg-indigo-50 hover:bg-indigo-100'
-                        } focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 disabled:opacity-50`}
+                        } focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500`}
                       >
-                        {loadingStates.export ? (
-                          <LoadingSpinner size="small" />
-                        ) : (
-                          <Download className="h-3 w-3 sm:h-4 sm:w-4 mr-1.5 sm:mr-2" />
-                        )}
+                        <Download className="h-3 w-3 sm:h-4 sm:w-4 mr-1.5 sm:mr-2" />
                         Export PDF
                       </button>
                     </div>
@@ -1685,7 +1478,7 @@ function App() {
                                 ? 'hover:bg-gray-600' 
                                 : 'hover:bg-gray-200'
                             }`}
-                            title={t('copySql')}
+                            title="Copy SQL"
                           >
                             {copiedSQL ? (
                               <Check className="h-3 w-3 sm:h-4 sm:w-4 text-green-500" />
@@ -1711,7 +1504,7 @@ function App() {
                   ) : (
                     <div className={`p-3 sm:p-4 rounded-lg ${darkMode ? 'bg-gray-900' : 'bg-gray-50'}`}>
                       <p className={`text-center text-xs sm:text-sm ${darkMode ? 'text-gray-400' : 'text-gray-500'}`}>
-                        {t('noResults')}
+                        No results found
                       </p>
                     </div>
                   )}
@@ -1730,13 +1523,13 @@ function App() {
                   <div className="grid grid-cols-1 gap-3 sm:gap-4">
                     <div>
                       <label className={`block text-xs sm:text-sm font-medium mb-1 sm:mb-2 ${darkMode ? 'text-gray-300' : 'text-gray-700'}`}>
-                        {t('tableName')}
+                        Table Name
                       </label>
                       <input
                         type="text"
                         value={customTableName}
                         onChange={(e) => setCustomTableName(e.target.value)}
-                        placeholder={t('enterTableName')}
+                        placeholder="Enter table name"
                         className={`w-full px-2 sm:px-3 py-1.5 sm:py-2 rounded-lg border text-xs sm:text-sm ${
                           darkMode
                             ? 'bg-gray-700 border-gray-600 text-gray-200'
@@ -1746,7 +1539,7 @@ function App() {
                     </div>
                     <div>
                       <label className={`block text-xs sm:text-sm font-medium mb-1 sm:mb-2 ${darkMode ? 'text-gray-300' : 'text-gray-700'}`}>
-                        {t('sqlType')}
+                        SQL Type
                       </label>
                       <div className={`w-full px-2 sm:px-3 py-1.5 sm:py-2 rounded-lg border text-xs sm:text-sm ${
                         darkMode
@@ -1769,7 +1562,7 @@ function App() {
                       } focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 disabled:opacity-50`}
                     >
                       <Database className="h-3 w-3 sm:h-4 sm:w-4 mr-1.5 sm:mr-2" />
-                      {t('generateSql')}
+                      Generate SQL
                     </button>
                   </div>
 
@@ -1789,7 +1582,7 @@ function App() {
                                 ? 'hover:bg-gray-600' 
                                 : 'hover:bg-gray-200'
                             }`}
-                            title={t('copySql')}
+                            title="Copy SQL"
                           >
                             {copiedSQL ? (
                               <Check className="h-3 w-3 sm:h-4 sm:w-4 text-green-500" />
@@ -1810,7 +1603,7 @@ function App() {
                               : 'bg-indigo-600 hover:bg-indigo-700 text-white'
                           } focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500`}
                         >
-                          <span>{t('openSqlOnlineCompiler')}</span>
+                          <span>Open SQL Online Compiler</span>
                           <svg className="w-3 h-3 sm:w-4 sm:h-4 ml-1.5 sm:ml-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
                           </svg>
@@ -1824,14 +1617,6 @@ function App() {
           </div>
         </main>
       )}
-      
-      {/* Mobile Navigation */}
-      <MobileNavigation />
-
-      {/* Quick Action Toolbar - adjust position for mobile */}
-      <div className="hidden lg:block">
-        <QuickActionToolbar />
-      </div>
     </div>
   );
 }
