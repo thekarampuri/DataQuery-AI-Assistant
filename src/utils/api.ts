@@ -12,9 +12,14 @@ export interface QueryResult {
   answer: string;
   sqlQuery: string;
   needsChart: boolean;
-  chartType: 'pie' | 'bar' | 'line' | null;
-  chartDataColumn: string;
+  chartType: string | null;
   chartData?: Array<{ name: string; value: number }>;
+  chartDataColumn?: string;
+  executionTime?: number;
+  confidence?: number;
+  chartTitle?: string;
+  chartSubtitle?: string;
+  excelFormula: string;
 }
 
 // Helper function to calculate average
@@ -58,7 +63,8 @@ const createDatasetSummary = (schema: DataSchema, data: any[]): QueryResult => {
     chartData: Object.entries(columnTypes).map(([type, count]) => ({
       name: type,
       value: count
-    }))
+    })),
+    excelFormula: ''
   };
 };
 
@@ -110,7 +116,8 @@ export const analyzeData = async (
       needsChart: true,
       chartType: 'bar',
       chartDataColumn: relevantColumns[0].name,
-      chartData: []
+      chartData: [],
+      excelFormula: ''
     };
 
     try {

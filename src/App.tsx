@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Upload, Database, FileSpreadsheet, PieChart, Download, Send, Table, ChevronLeft, ChevronRight, Moon, Sun, Copy, Check, BarChart, LineChart, Mic, MicOff, Volume1, Volume2, Book, Home, User, LogOut, Code } from 'lucide-react';
+import { Upload, Database, FileSpreadsheet, PieChart, Download, Send, Table, ChevronLeft, ChevronRight, Moon, Sun, Copy, Check, BarChart, LineChart, Mic, MicOff, Volume1, Volume2, Book, Home, User, LogOut, Code, Clock, PlusCircle } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import ChartComponent from './components/ChartComponent';
 import jsPDF from 'jspdf';
@@ -14,6 +14,9 @@ import { useAuth } from './hooks/useAuth';
 import { auth } from './config/firebase';
 import { signOut } from 'firebase/auth';
 import { useNavigate } from 'react-router-dom';
+import HistorySidebar from './components/HistorySidebar';
+import { QueryResult, HistorySession } from './types/history';
+import * as historyService from './services/historyService';
 
 // Add these types before the App function
 type SqlType = 'MySQL';
@@ -112,21 +115,6 @@ declare global {
   }
 }
 
-// Define QueryResult interface locally to avoid conflict
-interface QueryResult {
-  answer: string;
-  sqlQuery: string;
-  needsChart: boolean;
-  chartType: string | null;
-  chartData?: Array<{ name: string; value: number }>;
-  chartDataColumn?: string;
-  executionTime?: number;
-  confidence?: number;
-  chartTitle?: string;
-  chartSubtitle?: string;
-  excelFormula?: string;
-}
-
 // Add a function to format the natural language response
 const formatNLResponse = (question: string, data: any[], schema: DataSchema): string => {
   // Format based on question type
@@ -208,6 +196,10 @@ function App() {
   const [showSqlConversion, setShowSqlConversion] = useState(false);
   const { user } = useAuth();
   const navigate = useNavigate();
+  const [isHistorySidebarOpen, setIsHistorySidebarOpen] = useState(false);
+  const [sessions, setSessions] = useState<HistorySession[]>([]);
+  const [currentSessionId, setCurrentSessionId] = useState<string | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
     const timer = setTimeout(() => {
@@ -271,6 +263,68 @@ function App() {
       }
     };
   }, []);
+
+  // Load user's sessions
+  useEffect(() => {
+    const loadSessions = async () => {
+      if (user) {
+        const userSessions = await historyService.getUserSessions(user.uid);
+        setSessions(userSessions);
+      }
+    };
+
+    loadSessions();
+  }, [user]);
+
+  // Create new session when file is uploaded
+  useEffect(() => {
+    const createNewSession = async () => {
+      if (user && uploadedFile && schema) {
+        const fileMetadata = {
+          id: Math.random().toString(36).substr(2, 9),
+          name: uploadedFile.name,
+          uploadDate: new Date(),
+          schema
+        };
+
+        const sessionId = await historyService.createSession(user.uid, fileMetadata);
+        setCurrentSessionId(sessionId);
+      }
+    };
+
+    if (uploadedFile && schema && user && !currentSessionId) {
+      createNewSession();
+    }
+  }, [uploadedFile, schema, user, currentSessionId]);
+
+  // Update session when conversation changes
+  useEffect(() => {
+    const updateCurrentSession = async () => {
+      if (currentSessionId && queryResult) {
+        await historyService.updateSession(
+          currentSessionId,
+          conversation,
+          [queryResult]
+        );
+      }
+    };
+
+    if (conversation.length > 0) {
+      updateCurrentSession();
+    }
+  }, [conversation, queryResult, currentSessionId]);
+
+  // Check authentication on mount
+  useEffect(() => {
+    const unsubscribe = auth.onAuthStateChanged((user) => {
+      setIsLoading(false);
+      if (!user) {
+        navigate('/login');
+      }
+    });
+
+    return () => unsubscribe();
+  }, [navigate]);
 
   const copyRowToClipboard = async (row: any, rowIndex: number) => {
     const text = Object.entries(row)
@@ -609,7 +663,7 @@ function App() {
         answer: result.answer,
         sqlQuery: sqlQuery,
         chartType: result.chartType,
-        excelFormula: excelFormula
+        excelFormula: excelFormula || '' // Ensure excelFormula is never undefined
       });
 
       setQuery('');
@@ -983,6 +1037,98 @@ function App() {
     }
   };
 
+  const handleSelectSession = async (session: HistorySession) => {
+    // Load session data
+    setUploadedFile(null); // Clear current file
+    setSchema(session.file.schema);
+    setConversation(session.conversation);
+    setQueryResult(session.queries[session.queries.length - 1] || null);
+    setCurrentSessionId(session.id);
+    setIsHistorySidebarOpen(false);
+  };
+
+  const handleDeleteSession = async (sessionId: string) => {
+    try {
+      await historyService.deleteSession(sessionId);
+      setSessions(sessions.filter(s => s.id !== sessionId));
+      if (currentSessionId === sessionId) {
+        setCurrentSessionId(null);
+        setUploadedFile(null);
+        setSchema(null);
+        setConversation([]);
+        setQueryResult(null);
+      }
+    } catch (error) {
+      console.error('Error deleting session:', error);
+    }
+  };
+
+  const handleNewChat = async () => {
+    // Save current session if exists
+    if (currentSessionId && conversation.length > 0) {
+      try {
+        await historyService.updateSession(
+          currentSessionId,
+          conversation,
+          queryResult ? [queryResult] : []
+        );
+      } catch (error) {
+        console.error('Error saving current session:', error);
+      }
+    }
+
+    // Reset the application state
+    setUploadedFile(null);
+    setSchema(null);
+    setData([]);
+    setQuery('');
+    setConversation([]);
+    setQueryResult(null);
+    setCurrentSessionId(null);
+    setCurrentPage(1);
+  };
+
+  // Show loading state
+  if (isLoading) {
+    return (
+      <div className={`min-h-screen flex items-center justify-center ${
+        darkMode ? 'bg-gray-900' : 'bg-gradient-to-br from-indigo-50 via-purple-50 to-pink-50'
+      }`}>
+        <div className="flex flex-col items-center space-y-4">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-indigo-500"></div>
+          <p className={`text-sm ${darkMode ? 'text-gray-400' : 'text-gray-600'}`}>
+            Loading...
+          </p>
+        </div>
+      </div>
+    );
+  }
+
+  // Show login redirect message if not authenticated
+  if (!user) {
+    return (
+      <div className={`min-h-screen flex items-center justify-center ${
+        darkMode ? 'bg-gray-900' : 'bg-gradient-to-br from-indigo-50 via-purple-50 to-pink-50'
+      }`}>
+        <div className="text-center">
+          <p className={`text-lg ${darkMode ? 'text-gray-200' : 'text-gray-800'}`}>
+            Please log in to continue
+          </p>
+          <button
+            onClick={() => navigate('/login')}
+            className={`mt-4 px-6 py-2 rounded-lg ${
+              darkMode
+                ? 'bg-indigo-600 hover:bg-indigo-700 text-white'
+                : 'bg-indigo-500 hover:bg-indigo-600 text-white'
+            }`}
+          >
+            Go to Login
+          </button>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className={`min-h-screen ${darkMode ? 'bg-gray-900' : 'bg-gradient-to-br from-indigo-50 via-purple-50 to-pink-50'}`}>
       <nav className={`${darkMode ? 'bg-gray-800 border-gray-700' : 'bg-white border-indigo-100'} shadow-lg border-b fixed top-0 left-0 right-0 z-[1000]`}>
@@ -1088,6 +1234,18 @@ function App() {
           </div>
         </div>
       </nav>
+
+      {/* Add History Sidebar */}
+      <HistorySidebar
+        isOpen={isHistorySidebarOpen}
+        toggleSidebar={() => setIsHistorySidebarOpen(!isHistorySidebarOpen)}
+        sessions={sessions}
+        currentSessionId={currentSessionId}
+        onSelectSession={handleSelectSession}
+        onDeleteSession={handleDeleteSession}
+        onNewChat={handleNewChat}
+        darkMode={darkMode}
+      />
 
       {showEducation ? (
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 mt-[120px] sm:mt-[80px]">
