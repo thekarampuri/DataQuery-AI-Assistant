@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Upload, Database, FileSpreadsheet, PieChart, Download, Send, Table, ChevronLeft, ChevronRight, Moon, Sun, Copy, Check, BarChart, LineChart, Mic, MicOff, Volume1, Volume2, Book, Home, User, LogOut } from 'lucide-react';
+import { Upload, Database, FileSpreadsheet, PieChart, Download, Send, Table, ChevronLeft, ChevronRight, Moon, Sun, Copy, Check, BarChart, LineChart, Mic, MicOff, Volume1, Volume2, Book, Home, User, LogOut, Code } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import ChartComponent from './components/ChartComponent';
 import jsPDF from 'jspdf';
@@ -7,6 +7,7 @@ import html2canvas from 'html2canvas';
 import { analyzeData, DataSchema } from './utils/api';
 import DataVisualization from './components/DataVisualization';
 import Education from './components/Education';
+import SqlConversion from './components/SqlConversion';
 import { analyzeDataWithAI } from './utils/gemini';
 import { parseCSVToJSON } from './utils/csvParser';
 import { useAuth } from './hooks/useAuth';
@@ -123,6 +124,7 @@ interface QueryResult {
   confidence?: number;
   chartTitle?: string;
   chartSubtitle?: string;
+  excelFormula?: string;
 }
 
 // Add a function to format the natural language response
@@ -176,64 +178,6 @@ function formatSQLQuery(query: string): string {
   return formattedQuery;
 }
 
-const convertExcelToSQL = (tableName: string, schema: DataSchema, data: any[], sqlType: SqlType): string => {
-  // Helper function to get SQL type based on database type
-  const getSqlType = (colType: string, type: SqlType): string => {
-    if (colType === 'number') {
-      const hasDecimal = data.some(row => {
-        const val = row[colType];
-        return val && Number(val) % 1 !== 0;
-      });
-      
-      return hasDecimal ? 'DECIMAL(10,2)' : 'INT';
-    }
-    
-    if (colType === 'boolean') {
-      return 'TINYINT(1)';
-    }
-    
-    if (colType === 'datetime') {
-      return 'DATETIME';
-    }
-    
-    return 'VARCHAR(255)';
-  };
-
-  // Get the correct identifier quotes based on SQL type
-  const quote = sqlType === 'MySQL' ? '`' : '"';
-
-  // Create table query
-  const createTableQuery = `CREATE TABLE ${sqlType === 'MySQL' ? 'IF NOT EXISTS ' : ''}${quote}${tableName}${quote} (\n` +
-    schema.columns.map(col => {
-      const colSqlType = getSqlType(col.type, sqlType);
-      return `  ${quote}${col.name}${quote} ${colSqlType}`;
-    }).join(',\n') +
-    '\n);\n\n';
-
-  // Insert queries
-  const insertQueries = data.map(row => {
-    const columns = schema.columns.map(col => `${quote}${col.name}${quote}`).join(', ');
-    const values = schema.columns.map(col => {
-      const value = row[col.name];
-      if (value === null || value === undefined) return 'NULL';
-      if (col.type === 'number') return value;
-      if (col.type === 'boolean') {
-        if (sqlType === 'MySQL') return value ? '1' : '0';
-        return value ? 'TRUE' : 'FALSE';
-      }
-      if (col.type === 'datetime') {
-        const date = new Date(value);
-        return isNaN(date.getTime()) ? 'NULL' : `'${date.toISOString().slice(0, 19).replace('T', ' ')}'`;
-      }
-      return `'${String(value).replace(/'/g, "''")}'`;
-    }).join(', ');
-    return `INSERT INTO ${quote}${tableName}${quote} (${columns}) VALUES (${values});`;
-  }).join('\n');
-
-  // Return only create and insert queries
-  return `${createTableQuery}${insertQueries}\n`;
-};
-
 function App() {
   const [uploadedFile, setUploadedFile] = useState<File | null>(null);
   const [query, setQuery] = useState('');
@@ -260,11 +204,8 @@ function App() {
   const [copiedSQL, setCopiedSQL] = useState(false);
   const [excelFormula, setExcelFormula] = useState<string>('');
   const [speakingMessageIndex, setSpeakingMessageIndex] = useState<number | null>(null);
-  const [sqlQueries, setSqlQueries] = useState<string>('');
-  const [showSqlQueries, setShowSqlQueries] = useState(false);
-  const [customTableName, setCustomTableName] = useState<string>('');
-  const [selectedSqlType, setSelectedSqlType] = useState<SqlType>('MySQL');
   const [showEducation, setShowEducation] = useState(false);
+  const [showSqlConversion, setShowSqlConversion] = useState(false);
   const { user } = useAuth();
   const navigate = useNavigate();
 
@@ -384,7 +325,8 @@ function App() {
       needsChart: true,
       chartType: chartType,
       chartData: transformedData,
-      chartDataColumn: columnName
+      chartDataColumn: columnName,
+      excelFormula: ''
     };
 
     setQueryResult(newQueryResult);
@@ -441,15 +383,191 @@ function App() {
     }
   };
 
+  const generateSqlQuery = (question: string, tableName: string, schema: DataSchema): string => {
+    const q = question.toLowerCase();
+    
+    // Helper to get column name regardless of case
+    const getColumnName = (searchName: string): string | undefined => {
+      return schema.columns.find(col => 
+        col.name.toLowerCase() === searchName.toLowerCase()
+      )?.name;
+    };
+
+    // Extract name from question if present
+    const extractName = (q: string): string => {
+      const nameMatch = q.match(/of\s+(\w+)/i) || q.match(/for\s+(\w+)/i);
+      return nameMatch ? nameMatch[1] : '';
+    };
+
+    // Gender queries
+    if (q.includes('gender') || q.includes('sex')) {
+      const name = extractName(q);
+      const genderCol = getColumnName('gender') || 'Gender';
+      const nameCol = getColumnName('first_name') || getColumnName('name') || 'First_Name';
+      if (name) {
+        return `SELECT ${genderCol}\nFROM ${tableName}\nWHERE LOWER(${nameCol}) = '${name.toLowerCase()}';`;
+      }
+      return `SELECT ${genderCol}, COUNT(*) as count\nFROM ${tableName}\nGROUP BY ${genderCol};`;
+    }
+
+    // Age queries
+    if (q.includes('age')) {
+      const name = extractName(q);
+      const ageCol = getColumnName('age') || 'Age';
+      const nameCol = getColumnName('first_name') || getColumnName('name') || 'First_Name';
+      if (name) {
+        return `SELECT ${ageCol}\nFROM ${tableName}\nWHERE LOWER(${nameCol}) = '${name.toLowerCase()}';`;
+      }
+      if (q.includes('average')) {
+        return `SELECT AVG(${ageCol}) as average_age\nFROM ${tableName};`;
+      }
+      return `SELECT ${ageCol}, COUNT(*) as count\nFROM ${tableName}\nGROUP BY ${ageCol}\nORDER BY ${ageCol};`;
+    }
+
+    // Count queries
+    if (q.includes('how many')) {
+      if (q.includes('gender') || q.includes('sex')) {
+        const genderCol = getColumnName('gender') || 'Gender';
+        return `SELECT ${genderCol}, COUNT(*) as count\nFROM ${tableName}\nGROUP BY ${genderCol};`;
+      }
+      return `SELECT COUNT(*) as total\nFROM ${tableName};`;
+    }
+
+    // Name queries
+    if (q.includes('name')) {
+      const nameCol = getColumnName('first_name') || getColumnName('name') || 'First_Name';
+      if (q.includes('start')) {
+        const letter = q.match(/start\s+with\s+(\w)/i)?.[1] || '';
+        return `SELECT ${nameCol}\nFROM ${tableName}\nWHERE ${nameCol} LIKE '${letter}%';`;
+      }
+      return `SELECT ${nameCol}\nFROM ${tableName}\nORDER BY ${nameCol};`;
+    }
+
+    // Details queries
+    if (q.includes('details')) {
+      const name = extractName(q);
+      const nameCol = getColumnName('first_name') || getColumnName('name') || 'First_Name';
+      if (name) {
+        return `SELECT *\nFROM ${tableName}\nWHERE LOWER(${nameCol}) = '${name.toLowerCase()}';`;
+      }
+      return `SELECT *\nFROM ${tableName};`;
+    }
+
+    // List all query
+    if (q.includes('list all') || q.includes('show all')) {
+      return `SELECT *\nFROM ${tableName};`;
+    }
+
+    // Default to a general query if no specific pattern is matched
+    return `SELECT *\nFROM ${tableName}\nLIMIT 10;`;
+  };
+
+  const generateExcelFormula = (question: string, schema: DataSchema): string => {
+    const q = question.toLowerCase();
+    
+    // Helper to get column letter
+    const getColumnLetter = (colName: string): string => {
+      const colIndex = schema.columns.findIndex(col => 
+        col.name.toLowerCase() === colName.toLowerCase()
+      );
+      return colIndex >= 0 ? String.fromCharCode(65 + colIndex) : 'A';
+    };
+
+    // Extract name from question if present
+    const extractName = (q: string): string => {
+      const nameMatch = q.match(/of\s+(\w+)/i) || q.match(/for\s+(\w+)/i);
+      return nameMatch ? nameMatch[1].toLowerCase() : '';
+    };
+
+    // Gender queries
+    if (q.includes('gender') || q.includes('sex')) {
+      const name = extractName(q);
+      const genderCol = getColumnLetter(schema.columns.find(col => 
+        col.name.toLowerCase() === 'gender'
+      )?.name || 'Gender');
+      const nameCol = getColumnLetter(schema.columns.find(col => 
+        col.name.toLowerCase() === 'first_name' || col.name.toLowerCase() === 'name'
+      )?.name || 'First_Name');
+      
+      if (name) {
+        return `=VLOOKUP("${name}", ${nameCol}:${genderCol}, ${genderCol.charCodeAt(0) - nameCol.charCodeAt(0) + 1}, FALSE)`;
+      }
+      return `=COUNTIFS(${genderCol}:${genderCol}, {"Male", "Female"})`;
+    }
+
+    // Age queries
+    if (q.includes('age')) {
+      const name = extractName(q);
+      const ageCol = getColumnLetter(schema.columns.find(col => 
+        col.name.toLowerCase() === 'age'
+      )?.name || 'Age');
+      const nameCol = getColumnLetter(schema.columns.find(col => 
+        col.name.toLowerCase() === 'first_name' || col.name.toLowerCase() === 'name'
+      )?.name || 'First_Name');
+      
+      if (name) {
+        return `=VLOOKUP("${name}", ${nameCol}:${ageCol}, ${ageCol.charCodeAt(0) - nameCol.charCodeAt(0) + 1}, FALSE)`;
+      }
+      if (q.includes('average')) {
+        return `=AVERAGE(${ageCol}:${ageCol})`;
+      }
+      return `=FREQUENCY(${ageCol}:${ageCol}, ${ageCol}:${ageCol})`;
+    }
+
+    // Count queries
+    if (q.includes('how many')) {
+      if (q.includes('gender') || q.includes('sex')) {
+        const genderCol = getColumnLetter(schema.columns.find(col => 
+          col.name.toLowerCase() === 'gender'
+        )?.name || 'Gender');
+        return `=COUNTIFS(${genderCol}:${genderCol}, {"Male", "Female"})`;
+      }
+      return `=COUNTA(A:A)-1`;  // -1 to exclude header
+    }
+
+    // Name queries
+    if (q.includes('name')) {
+      const nameCol = getColumnLetter(schema.columns.find(col => 
+        col.name.toLowerCase() === 'first_name' || col.name.toLowerCase() === 'name'
+      )?.name || 'First_Name');
+      if (q.includes('start')) {
+        const letter = q.match(/start\s+with\s+(\w)/i)?.[1] || '';
+        return `=FILTER(${nameCol}:${nameCol}, LEFT(${nameCol}:${nameCol},1)="${letter}")`;
+      }
+      return `=SORT(${nameCol}:${nameCol})`;
+    }
+
+    // Details queries
+    if (q.includes('details')) {
+      const name = extractName(q);
+      const nameCol = getColumnLetter(schema.columns.find(col => 
+        col.name.toLowerCase() === 'first_name' || col.name.toLowerCase() === 'name'
+      )?.name || 'First_Name');
+      if (name) {
+        return `=FILTER(A:Z, ${nameCol}:${nameCol}="${name}")`;
+      }
+      return `=A:Z`;
+    }
+
+    // Default formula
+    return `=FILTER(A:Z, A:A<>"")`;
+  };
+
   const handleQuerySubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!data.length || !query.trim() || isAnalyzing) return;
+    if (!data.length || !query.trim() || isAnalyzing || !uploadedFile || !schema) return;
 
     const newMessage = { role: 'user' as const, content: query };
     setConversation(prev => [...prev, newMessage]);
     setIsAnalyzing(true);
 
     try {
+      // Get table name from uploaded file (remove extension and special characters)
+      const tableName = uploadedFile.name
+        .replace(/\.[^/.]+$/, "") // Remove file extension
+        .replace(/[^a-zA-Z0-9_]/g, "_") // Replace special characters with underscore
+        .toLowerCase();
+
       // Handle greeting messages directly without calling LLM
       const greetings = ['hi', 'hello', 'hey', 'greetings'];
       if (greetings.includes(query.toLowerCase().trim())) {
@@ -463,7 +581,8 @@ function App() {
           sqlQuery: '',
           needsChart: false,
           chartType: null,
-          chartDataColumn: ''
+          chartDataColumn: '',
+          excelFormula: ''
         });
         
         setQuery('');
@@ -480,31 +599,18 @@ function App() {
         content: result.answer
       }]);
 
-      // Update query result with both LLM response and visualization data
+      // Generate SQL query and Excel formula
+      const sqlQuery = generateSqlQuery(query, tableName, schema);
+      const excelFormula = generateExcelFormula(query, schema);
+
+      // Update query result
       setQueryResult({
         ...result,
         answer: result.answer,
-        sqlQuery: result.sqlQuery,
-        chartType: result.chartType
+        sqlQuery: sqlQuery,
+        chartType: result.chartType,
+        excelFormula: excelFormula
       });
-
-      // Generate Excel formula based on the query
-      let excelFormula = '';
-      if (queryResult?.sqlQuery) {
-        const sqlLower = queryResult.sqlQuery.toLowerCase();
-        if (sqlLower.includes('count')) {
-          excelFormula = `=COUNTIF(Sheet1!A:A, "criteria")`;
-        } else if (sqlLower.includes('avg') || sqlLower.includes('average')) {
-          excelFormula = `=AVERAGE(Sheet1!A:A)`;
-        } else if (sqlLower.includes('sum')) {
-          excelFormula = `=SUM(Sheet1!A:A)`;
-        } else if (sqlLower.includes('max')) {
-          excelFormula = `=MAX(Sheet1!A:A)`;
-        } else if (sqlLower.includes('min')) {
-          excelFormula = `=MIN(Sheet1!A:A)`;
-        }
-      }
-      setExcelFormula(excelFormula);
 
       setQuery('');
     } catch (error) {
@@ -524,7 +630,8 @@ function App() {
         sqlQuery: '',
         needsChart: false,
         chartType: null,
-        chartDataColumn: ''
+        chartDataColumn: '',
+        excelFormula: ''
       });
     } finally {
       setIsAnalyzing(false);
@@ -805,7 +912,8 @@ function App() {
         chartData: prev!.chartData,
         chartDataColumn: prev!.chartDataColumn,
         executionTime: prev!.executionTime,
-        confidence: prev!.confidence
+        confidence: prev!.confidence,
+        excelFormula: prev!.excelFormula
       }));
     }
   };
@@ -865,16 +973,6 @@ function App() {
     speechSynthesis.speak(utterance);
   };
 
-  // Update handleConvertToSQL
-  const handleConvertToSQL = () => {
-    if (!schema || !data.length || !customTableName.trim()) return;
-    
-    const tableName = customTableName.trim().replace(/[^a-zA-Z0-9_]/g, '_').toLowerCase();
-    const queries = convertExcelToSQL(tableName, schema, data, selectedSqlType);
-    setSqlQueries(queries);
-    setShowSqlQueries(true);
-  };
-
   // Add sign out handler
   const handleSignOut = async () => {
     try {
@@ -913,8 +1011,24 @@ function App() {
                 </div>
               )}
               <div className="flex items-center gap-2">
+                {queryResult && (
+                  <button
+                    onClick={generatePDF}
+                    className={`flex items-center px-2 sm:px-4 py-1 sm:py-2 rounded-lg text-xs sm:text-sm font-medium ${
+                      darkMode
+                        ? 'bg-gray-700 text-gray-200 hover:bg-gray-600'
+                        : 'bg-indigo-50 text-indigo-600 hover:bg-indigo-100'
+                    }`}
+                  >
+                    <Download className="h-3 w-3 sm:h-4 sm:w-4 mr-1 sm:mr-2" />
+                    Export PDF
+                  </button>
+                )}
                 <button
-                  onClick={() => setShowEducation(false)}
+                  onClick={() => {
+                    setShowEducation(false);
+                    setShowSqlConversion(false);
+                  }}
                   className={`flex items-center px-2 sm:px-4 py-1 sm:py-2 rounded-lg text-xs sm:text-sm font-medium ${
                     darkMode
                       ? 'bg-gray-700 text-gray-200 hover:bg-gray-600'
@@ -925,7 +1039,10 @@ function App() {
                   Home
                 </button>
                 <button
-                  onClick={() => setShowEducation(!showEducation)}
+                  onClick={() => {
+                    setShowEducation(!showEducation);
+                    setShowSqlConversion(false);
+                  }}
                   className={`flex items-center px-2 sm:px-4 py-1 sm:py-2 rounded-lg text-xs sm:text-sm font-medium ${
                     darkMode
                       ? 'bg-gray-700 text-gray-200 hover:bg-gray-600'
@@ -934,6 +1051,20 @@ function App() {
                 >
                   <Book className="h-3 w-3 sm:h-4 sm:w-4 mr-1 sm:mr-2" />
                   Learn
+                </button>
+                <button
+                  onClick={() => {
+                    setShowSqlConversion(!showSqlConversion);
+                    setShowEducation(false);
+                  }}
+                  className={`flex items-center px-2 sm:px-4 py-1 sm:py-2 rounded-lg text-xs sm:text-sm font-medium ${
+                    darkMode
+                      ? 'bg-gray-700 text-gray-200 hover:bg-gray-600'
+                      : 'bg-indigo-50 text-indigo-600 hover:bg-indigo-100'
+                  }`}
+                >
+                  <Code className="h-3 w-3 sm:h-4 sm:w-4 mr-1 sm:mr-2" />
+                  SQL
                 </button>
                 <button
                   onClick={handleSignOut}
@@ -962,6 +1093,8 @@ function App() {
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 mt-[120px] sm:mt-[80px]">
           <Education darkMode={darkMode} />
         </div>
+      ) : showSqlConversion ? (
+        <SqlConversion darkMode={darkMode} schema={schema} data={data} />
       ) : (
         <main className="max-w-7xl mx-auto px-2 sm:px-6 lg:px-8 py-2 sm:py-8 mt-[120px] sm:mt-[80px]">
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-2 sm:gap-8">
@@ -1060,106 +1193,56 @@ function App() {
                       Data Preview
                     </h3>
                     <div className={`overflow-x-auto ${darkMode ? 'bg-gray-900' : 'bg-gray-50'} rounded-lg p-4`}>
-                      <table className="min-w-full divide-y divide-gray-200">
-                        <thead>
-                          <tr>
-                            <th className={`px-4 py-2 text-left text-xs font-medium ${darkMode ? 'text-gray-400' : 'text-gray-500'} uppercase tracking-wider w-10`}>
-                              Actions
-                            </th>
-                            {schema.columns.map((column, index) => (
-                              <th
-                                key={index}
-                                className={`px-4 py-2 text-left text-xs font-medium ${darkMode ? 'text-gray-400' : 'text-gray-500'} uppercase tracking-wider`}
-                              >
-                                {column.name}
+                      <div className="max-h-[500px] overflow-y-auto custom-scrollbar">
+                        <table className="min-w-full divide-y divide-gray-200">
+                          <thead className="sticky top-0 z-10 bg-inherit">
+                            <tr>
+                              <th className={`px-4 py-2 text-left text-xs font-medium ${darkMode ? 'text-gray-400' : 'text-gray-500'} uppercase tracking-wider w-10 bg-inherit`}>
+                                Actions
                               </th>
-                            ))}
-                          </tr>
-                        </thead>
-                        <tbody className={`divide-y ${darkMode ? 'divide-gray-700' : 'divide-gray-200'}`}>
-                          {paginatedData.map((row, rowIndex) => (
-                            <tr key={rowIndex} className={darkMode ? 'hover:bg-gray-800' : 'hover:bg-gray-100'}>
-                              <td className={`px-4 py-2 text-sm whitespace-nowrap ${darkMode ? 'text-gray-200' : 'text-gray-900'}`}>
-                                <button
-                                  onClick={() => copyRowToClipboard(row, rowIndex)}
-                                  className={`p-1.5 rounded-full transition-colors ${
-                                    darkMode 
-                                      ? 'hover:bg-gray-700 focus:bg-gray-700' 
-                                      : 'hover:bg-gray-200 focus:bg-gray-200'
-                                  }`}
-                                  title="Copy Row Data"
+                              {schema.columns.map((column, index) => (
+                                <th
+                                  key={index}
+                                  className={`px-4 py-2 text-left text-xs font-medium ${darkMode ? 'text-gray-400' : 'text-gray-500'} uppercase tracking-wider bg-inherit`}
                                 >
-                                  {copiedRow === rowIndex ? (
-                                    <Check className="h-4 w-4 text-green-500" />
-                                  ) : (
-                                    <Copy className={`h-4 w-4 ${darkMode ? 'text-gray-400' : 'text-gray-600'}`} />
-                                  )}
-                                </button>
-                              </td>
-                              {schema.columns.map((column, colIndex) => (
-                                <td
-                                  key={colIndex}
-                                  className={`px-4 py-2 text-sm whitespace-nowrap ${darkMode ? 'text-gray-200' : 'text-gray-900'}`}
-                                >
-                                  {row[column.name]?.toString()}
-                                </td>
+                                  {column.name}
+                                </th>
                               ))}
                             </tr>
-                          ))}
-                        </tbody>
-                      </table>
-
-                      {/* Pagination */}
-                      {totalPages > 1 && (
-                        <div className="flex items-center justify-between mt-4">
-                          <button
-                            onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
-                            disabled={currentPage === 1}
-                            className={`inline-flex items-center px-3 py-1 border text-sm font-medium rounded-md ${
-                              darkMode
-                                ? 'border-gray-600 text-gray-300 bg-gray-800 hover:bg-gray-700'
-                                : 'border-gray-300 text-gray-700 bg-white hover:bg-gray-50'
-                            } disabled:opacity-50`}
-                          >
-                            <ChevronLeft className="h-4 w-4 mr-1" />
-                            Previous
-                          </button>
-                          <div className="flex items-center space-x-1">
-                            <input
-                              type="number"
-                              min="1"
-                              max={totalPages}
-                              value={currentPage}
-                              onChange={(e) => {
-                                const value = parseInt(e.target.value);
-                                if (value >= 1 && value <= totalPages) {
-                                  setCurrentPage(value);
-                                }
-                              }}
-                              className={`w-16 px-2 py-1 text-sm border rounded-md ${
-                                darkMode
-                                  ? 'bg-gray-700 border-gray-600 text-gray-200'
-                                  : 'bg-white border-gray-300 text-gray-700'
-                              } focus:ring-2 focus:ring-indigo-500 focus:border-transparent`}
-                            />
-                            <span className={`text-sm ${darkMode ? 'text-gray-400' : 'text-gray-500'}`}>
-                              Page {currentPage} of {totalPages}
-                            </span>
-                          </div>
-                          <button
-                            onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
-                            disabled={currentPage === totalPages}
-                            className={`inline-flex items-center px-3 py-1 border text-sm font-medium rounded-md ${
-                              darkMode
-                                ? 'border-gray-600 text-gray-300 bg-gray-800 hover:bg-gray-700'
-                                : 'border-gray-300 text-gray-700 bg-white hover:bg-gray-50'
-                            } disabled:opacity-50`}
-                          >
-                            Next
-                            <ChevronRight className="h-4 w-4 ml-1" />
-                          </button>
-                        </div>
-                      )}
+                          </thead>
+                          <tbody className={`divide-y ${darkMode ? 'divide-gray-700' : 'divide-gray-200'}`}>
+                            {data.map((row, rowIndex) => (
+                              <tr key={rowIndex} className={darkMode ? 'hover:bg-gray-800' : 'hover:bg-gray-100'}>
+                                <td className={`px-4 py-2 text-sm whitespace-nowrap ${darkMode ? 'text-gray-200' : 'text-gray-900'}`}>
+                                  <button
+                                    onClick={() => copyRowToClipboard(row, rowIndex)}
+                                    className={`p-1.5 rounded-full transition-colors ${
+                                      darkMode 
+                                        ? 'hover:bg-gray-700 focus:bg-gray-700' 
+                                        : 'hover:bg-gray-200 focus:bg-gray-200'
+                                    }`}
+                                    title="Copy Row Data"
+                                  >
+                                    {copiedRow === rowIndex ? (
+                                      <Check className="h-4 w-4 text-green-500" />
+                                    ) : (
+                                      <Copy className={`h-4 w-4 ${darkMode ? 'text-gray-400' : 'text-gray-600'}`} />
+                                    )}
+                                  </button>
+                                </td>
+                                {schema.columns.map((column, colIndex) => (
+                                  <td
+                                    key={colIndex}
+                                    className={`px-4 py-2 text-sm whitespace-nowrap ${darkMode ? 'text-gray-200' : 'text-gray-900'}`}
+                                  >
+                                    {row[column.name]?.toString()}
+                                  </td>
+                                ))}
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
                     </div>
                   </div>
                 </div>
@@ -1325,6 +1408,66 @@ function App() {
                 </form>
               </div>
 
+              {/* Results */}
+              <div className={`${darkMode ? 'bg-gray-800 border-gray-700' : 'bg-white border-indigo-100'} rounded-xl shadow-sm border p-3 sm:p-6`}>
+                <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between mb-3 sm:mb-4">
+                  <h2 className={`text-base sm:text-lg font-semibold ${darkMode ? 'text-white' : 'text-gray-900'}`}>
+                    Results
+                  </h2>
+                </div>
+                
+                <div ref={resultsRef}>
+                  {queryResult ? (
+                    <div className="space-y-3 sm:space-y-4">
+                      {/* SQL Query Section */}
+                      {queryResult.sqlQuery && (
+                        <div className={`p-3 sm:p-4 rounded-lg border relative ${darkMode ? 'bg-gray-900 border-gray-700' : 'bg-gradient-to-r from-indigo-50 to-purple-50 border-indigo-100'}`}>
+                          <h3 className={`text-xs sm:text-sm font-medium mb-1.5 sm:mb-2 ${darkMode ? 'text-gray-300' : 'text-gray-700'}`}>
+                            SQL Query
+                          </h3>
+                          <pre className={`whitespace-pre-wrap font-mono text-xs sm:text-sm ${darkMode ? 'text-gray-200' : 'text-gray-700'}`}>
+                            {queryResult.sqlQuery}
+                          </pre>
+                          <button
+                            onClick={() => copyToClipboard(queryResult.sqlQuery, 'sql')}
+                            className={`absolute top-1 sm:top-2 right-1 sm:right-2 p-1 sm:p-1.5 rounded-full transition-colors ${
+                              darkMode 
+                                ? 'hover:bg-gray-600' 
+                                : 'hover:bg-gray-200'
+                            }`}
+                            title="Copy SQL"
+                          >
+                            {copiedSQL ? (
+                              <Check className="h-3 w-3 sm:h-4 sm:w-4 text-green-500" />
+                            ) : (
+                              <Copy className={`h-3 w-3 sm:h-4 sm:w-4 ${darkMode ? 'text-gray-400' : 'text-gray-600'}`} />
+                            )}
+                          </button>
+                        </div>
+                      )}
+
+                      {/* Excel Formula Section */}
+                      {queryResult.excelFormula && (
+                        <div className={`p-3 sm:p-4 rounded-lg border ${darkMode ? 'bg-gray-900 border-gray-700' : 'bg-gradient-to-r from-indigo-50 to-purple-50 border-indigo-100'}`}>
+                          <h3 className={`text-xs sm:text-sm font-medium mb-1.5 sm:mb-2 ${darkMode ? 'text-gray-300' : 'text-gray-700'}`}>
+                            Excel Formula
+                          </h3>
+                          <p className={`text-xs sm:text-sm ${darkMode ? 'text-gray-200' : 'text-gray-700'}`}>
+                            {queryResult.excelFormula}
+                          </p>
+                        </div>
+                      )}
+                    </div>
+                  ) : (
+                    <div className={`p-3 sm:p-4 rounded-lg ${darkMode ? 'bg-gray-900' : 'bg-gray-50'}`}>
+                      <p className={`text-center text-xs sm:text-sm ${darkMode ? 'text-gray-400' : 'text-gray-500'}`}>
+                        No results found
+                      </p>
+                    </div>
+                  )}
+                </div>
+              </div>
+
               {/* Data Visualization */}
               <div className={`${darkMode ? 'bg-gray-800 border-gray-700' : 'bg-white border-indigo-100'} rounded-xl shadow-sm border p-3 sm:p-6`}>
                 <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between mb-3 sm:mb-4">
@@ -1416,184 +1559,6 @@ function App() {
                     chartTitle={queryResult?.chartTitle}
                     chartSubtitle={queryResult?.chartSubtitle}
                   />
-                </div>
-              </div>
-
-              {/* Results */}
-              <div className={`${darkMode ? 'bg-gray-800 border-gray-700' : 'bg-white border-indigo-100'} rounded-xl shadow-sm border p-3 sm:p-6`}>
-                <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between mb-3 sm:mb-4">
-                  <h2 className={`text-base sm:text-lg font-semibold ${darkMode ? 'text-white' : 'text-gray-900'}`}>
-                    Results
-                  </h2>
-                  {queryResult && (
-                    <div className="w-full sm:w-auto">
-                      <button
-                        onClick={generatePDF}
-                        className={`w-full sm:w-auto inline-flex items-center justify-center px-3 sm:px-4 py-1.5 sm:py-2 border text-xs sm:text-sm font-medium rounded-lg ${
-                          darkMode
-                            ? 'border-gray-600 text-gray-200 bg-gray-700 hover:bg-gray-600'
-                            : 'border-indigo-200 text-indigo-700 bg-indigo-50 hover:bg-indigo-100'
-                        } focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500`}
-                      >
-                        <Download className="h-3 w-3 sm:h-4 sm:w-4 mr-1.5 sm:mr-2" />
-                        Export PDF
-                      </button>
-                    </div>
-                  )}
-                </div>
-                
-                <div ref={resultsRef}>
-                  {queryResult ? (
-                    <div className="space-y-3 sm:space-y-4">
-                      {/* SQL Query Section */}
-                      {queryResult.sqlQuery && (
-                        <div className={`p-3 sm:p-4 rounded-lg border relative ${darkMode ? 'bg-gray-900 border-gray-700' : 'bg-gradient-to-r from-indigo-50 to-purple-50 border-indigo-100'}`}>
-                          <h3 className={`text-xs sm:text-sm font-medium mb-1.5 sm:mb-2 ${darkMode ? 'text-gray-300' : 'text-gray-700'}`}>
-                            SQL Query
-                          </h3>
-                          <pre className={`whitespace-pre-wrap font-mono text-xs sm:text-sm ${darkMode ? 'text-gray-200' : 'text-gray-700'}`}>
-                            {queryResult.sqlQuery}
-                          </pre>
-                          <button
-                            onClick={() => copyToClipboard(queryResult.sqlQuery, 'sql')}
-                            className={`absolute top-1 sm:top-2 right-1 sm:right-2 p-1 sm:p-1.5 rounded-full transition-colors ${
-                              darkMode 
-                                ? 'hover:bg-gray-600' 
-                                : 'hover:bg-gray-200'
-                            }`}
-                            title="Copy SQL"
-                          >
-                            {copiedSQL ? (
-                              <Check className="h-3 w-3 sm:h-4 sm:w-4 text-green-500" />
-                            ) : (
-                              <Copy className={`h-3 w-3 sm:h-4 sm:w-4 ${darkMode ? 'text-gray-400' : 'text-gray-600'}`} />
-                            )}
-                          </button>
-                        </div>
-                      )}
-
-                      {/* Excel Formula Section */}
-                      {excelFormula && (
-                        <div className={`p-3 sm:p-4 rounded-lg border ${darkMode ? 'bg-gray-900 border-gray-700' : 'bg-gradient-to-r from-indigo-50 to-purple-50 border-indigo-100'}`}>
-                          <h3 className={`text-xs sm:text-sm font-medium mb-1.5 sm:mb-2 ${darkMode ? 'text-gray-300' : 'text-gray-700'}`}>
-                            Excel Formula
-                          </h3>
-                          <p className={`text-xs sm:text-sm ${darkMode ? 'text-gray-200' : 'text-gray-700'}`}>
-                            {excelFormula}
-                          </p>
-                        </div>
-                      )}
-                    </div>
-                  ) : (
-                    <div className={`p-3 sm:p-4 rounded-lg ${darkMode ? 'bg-gray-900' : 'bg-gray-50'}`}>
-                      <p className={`text-center text-xs sm:text-sm ${darkMode ? 'text-gray-400' : 'text-gray-500'}`}>
-                        No results found
-                      </p>
-                    </div>
-                  )}
-                </div>
-              </div>
-
-              {/* SQL Conversion */}
-              <div className={`${darkMode ? 'bg-gray-800 border-gray-700' : 'bg-white border-indigo-100'} rounded-xl shadow-sm border p-3 sm:p-6`}>
-                <div className="flex items-center justify-between mb-3 sm:mb-4">
-                  <h2 className={`text-base sm:text-lg font-semibold ${darkMode ? 'text-white' : 'text-gray-900'}`}>
-                    SQL Conversion
-                  </h2>
-                </div>
-
-                <div className="space-y-3 sm:space-y-4">
-                  <div className="grid grid-cols-1 gap-3 sm:gap-4">
-                    <div>
-                      <label className={`block text-xs sm:text-sm font-medium mb-1 sm:mb-2 ${darkMode ? 'text-gray-300' : 'text-gray-700'}`}>
-                        Table Name
-                      </label>
-                      <input
-                        type="text"
-                        value={customTableName}
-                        onChange={(e) => setCustomTableName(e.target.value)}
-                        placeholder="Enter table name"
-                        className={`w-full px-2 sm:px-3 py-1.5 sm:py-2 rounded-lg border text-xs sm:text-sm ${
-                          darkMode
-                            ? 'bg-gray-700 border-gray-600 text-gray-200'
-                            : 'bg-white border-gray-300 text-gray-700'
-                        } focus:ring-2 focus:ring-indigo-500 focus:border-transparent`}
-                      />
-                    </div>
-                    <div>
-                      <label className={`block text-xs sm:text-sm font-medium mb-1 sm:mb-2 ${darkMode ? 'text-gray-300' : 'text-gray-700'}`}>
-                        SQL Type
-                      </label>
-                      <div className={`w-full px-2 sm:px-3 py-1.5 sm:py-2 rounded-lg border text-xs sm:text-sm ${
-                        darkMode
-                          ? 'bg-gray-700 border-gray-600 text-gray-200'
-                          : 'bg-white border-gray-300 text-gray-700'
-                      }`}>
-                        MySQL
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="flex justify-end mt-3 sm:mt-4">
-                    <button
-                      onClick={handleConvertToSQL}
-                      disabled={!schema || !data.length || !customTableName.trim()}
-                      className={`w-full sm:w-auto inline-flex items-center justify-center px-3 sm:px-4 py-1.5 sm:py-2 border text-xs sm:text-sm font-medium rounded-lg ${
-                        darkMode
-                          ? 'border-gray-600 text-gray-200 bg-gray-700 hover:bg-gray-600'
-                          : 'border-indigo-200 text-indigo-700 bg-indigo-50 hover:bg-indigo-100'
-                      } focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 disabled:opacity-50`}
-                    >
-                      <Database className="h-3 w-3 sm:h-4 sm:w-4 mr-1.5 sm:mr-2" />
-                      Generate SQL
-                    </button>
-                  </div>
-
-                  {showSqlQueries && sqlQueries && (
-                    <div className="space-y-3 sm:space-y-4 mt-3 sm:mt-4">
-                      <div className={`p-3 sm:p-4 rounded-lg border relative ${darkMode ? 'bg-gray-900 border-gray-700' : 'bg-gradient-to-r from-indigo-50 to-purple-50 border-indigo-100'}`}>
-                        <div className="max-h-72 sm:max-h-96 overflow-y-auto custom-scrollbar">
-                          <pre className={`whitespace-pre-wrap font-mono text-xs sm:text-sm ${darkMode ? 'text-gray-200' : 'text-gray-700'}`}>
-                            {sqlQueries}
-                          </pre>
-                        </div>
-                        <div className="absolute top-1 sm:top-2 right-1 sm:right-2 space-x-1 sm:space-x-2">
-                          <button
-                            onClick={() => copyToClipboard(sqlQueries, 'sql')}
-                            className={`p-1 sm:p-1.5 rounded-full transition-colors ${
-                              darkMode 
-                                ? 'hover:bg-gray-600' 
-                                : 'hover:bg-gray-200'
-                            }`}
-                            title="Copy SQL"
-                          >
-                            {copiedSQL ? (
-                              <Check className="h-3 w-3 sm:h-4 sm:w-4 text-green-500" />
-                            ) : (
-                              <Copy className={`h-3 w-3 sm:h-4 sm:w-4 ${darkMode ? 'text-gray-400' : 'text-gray-600'}`} />
-                            )}
-                          </button>
-                        </div>
-                      </div>
-                      <div className="flex justify-center">
-                        <a
-                          href="https://www.programiz.com/sql/online-compiler"
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className={`w-full sm:w-auto inline-flex items-center justify-center px-3 sm:px-4 py-1.5 sm:py-2 text-xs sm:text-sm font-medium rounded-lg ${
-                            darkMode
-                              ? 'bg-indigo-600 hover:bg-indigo-700 text-white'
-                              : 'bg-indigo-600 hover:bg-indigo-700 text-white'
-                          } focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500`}
-                        >
-                          <span>Open SQL Online Compiler</span>
-                          <svg className="w-3 h-3 sm:w-4 sm:h-4 ml-1.5 sm:ml-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
-                          </svg>
-                        </a>
-                      </div>
-                    </div>
-                  )}
                 </div>
               </div>
             </div>
