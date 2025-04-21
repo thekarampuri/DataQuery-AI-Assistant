@@ -190,6 +190,7 @@ function App() {
   const chartRef = useRef<HTMLDivElement>(null);
   const [copiedMessage, setCopiedMessage] = useState<number | null>(null);
   const [copiedSQL, setCopiedSQL] = useState(false);
+  const [copiedExcel, setCopiedExcel] = useState(false);
   const [excelFormula, setExcelFormula] = useState<string>('');
   const [speakingMessageIndex, setSpeakingMessageIndex] = useState<number | null>(null);
   const [showEducation, setShowEducation] = useState(false);
@@ -268,8 +269,12 @@ function App() {
   useEffect(() => {
     const loadSessions = async () => {
       if (user) {
-        const userSessions = await historyService.getUserSessions(user.uid);
-        setSessions(userSessions);
+        try {
+          const userSessions = await historyService.getUserSessions(user.uid);
+          setSessions(userSessions);
+        } catch (error) {
+          console.error('Error loading sessions:', error);
+        }
       }
     };
 
@@ -280,15 +285,18 @@ function App() {
   useEffect(() => {
     const createNewSession = async () => {
       if (user && uploadedFile && schema) {
-        const fileMetadata = {
-          id: Math.random().toString(36).substr(2, 9),
-          name: uploadedFile.name,
-          uploadDate: new Date(),
-          schema
-        };
+        try {
+          const fileMetadata = {
+            name: uploadedFile.name,
+            uploadDate: new Date(),
+            schema
+          };
 
-        const sessionId = await historyService.createSession(user.uid, fileMetadata);
-        setCurrentSessionId(sessionId);
+          const sessionId = await historyService.createSession(user.uid, fileMetadata);
+          setCurrentSessionId(sessionId);
+        } catch (error) {
+          console.error('Error creating session:', error);
+        }
       }
     };
 
@@ -300,19 +308,24 @@ function App() {
   // Update session when conversation changes
   useEffect(() => {
     const updateCurrentSession = async () => {
-      if (currentSessionId && queryResult) {
-        await historyService.updateSession(
-          currentSessionId,
-          conversation,
-          [queryResult]
-        );
+      if (user && currentSessionId && queryResult) {
+        try {
+          await historyService.updateSession(
+            user.uid,
+            currentSessionId,
+            conversation,
+            [queryResult]
+          );
+        } catch (error) {
+          console.error('Error updating session:', error);
+        }
       }
     };
 
     if (conversation.length > 0) {
       updateCurrentSession();
     }
-  }, [conversation, queryResult, currentSessionId]);
+  }, [conversation, queryResult, currentSessionId, user]);
 
   // Check authentication on mount
   useEffect(() => {
@@ -426,7 +439,7 @@ function App() {
     }
   };
 
-  const copyToClipboard = async (text: string, type: 'message' | 'sql', index?: number) => {
+  const copyToClipboard = async (text: string, type: 'message' | 'sql' | 'excel', index?: number) => {
     await navigator.clipboard.writeText(text);
     if (type === 'message' && index !== undefined) {
       setCopiedMessage(index);
@@ -434,12 +447,28 @@ function App() {
     } else if (type === 'sql') {
       setCopiedSQL(true);
       setTimeout(() => setCopiedSQL(false), 2000);
+    } else if (type === 'excel') {
+      setCopiedExcel(true);
+      setTimeout(() => setCopiedExcel(false), 2000);
     }
   };
 
-  const generateSqlQuery = (question: string, tableName: string, schema: DataSchema): string => {
+  // Add this helper function to properly capitalize names
+  const capitalizeFirstLetter = (str: string): string => {
+    return str.charAt(0).toUpperCase() + str.slice(1).toLowerCase();
+  };
+
+  const generateSqlQuery = (question: string, tableName: string, schema: DataSchema): string | null => {
     const q = question.toLowerCase();
     
+    // Check if it's a visualization-only query
+    const isVisualizationQuery = (q.includes('display') || q.includes('show') || q.includes('visualize')) &&
+      (q.includes('first') || q.includes('top') || q.includes('chart') || q.includes('graph'));
+    
+    if (isVisualizationQuery) {
+      return null;
+    }
+
     // Helper to get column name regardless of case
     const getColumnName = (searchName: string): string | undefined => {
       return schema.columns.find(col => 
@@ -447,11 +476,24 @@ function App() {
       )?.name;
     };
 
-    // Extract name from question if present
+    // Extract name and capitalize it properly
     const extractName = (q: string): string => {
-      const nameMatch = q.match(/of\s+(\w+)/i) || q.match(/for\s+(\w+)/i);
-      return nameMatch ? nameMatch[1] : '';
+      // Look for name patterns in questions about country, age, gender, etc.
+      const nameMatch = q.match(/of\s+(\w+)/i) || q.match(/for\s+(\w+)/i) || 
+                       q.match(/=\s*['"]?(\w+)['"]?/i) || q.match(/is\s+(\w+)/i);
+      return nameMatch ? capitalizeFirstLetter(nameMatch[1]) : '';
     };
+
+    // Country queries
+    if (q.includes('country')) {
+      const name = extractName(q);
+      const countryCol = getColumnName('country') || 'Country';
+      const nameCol = getColumnName('first_name') || getColumnName('name') || 'First_Name';
+      if (name) {
+        return `SELECT ${countryCol}\nFROM ${tableName}\nWHERE ${nameCol} = '${name}';`;
+      }
+      return `SELECT ${countryCol}, COUNT(*) as count\nFROM ${tableName}\nGROUP BY ${countryCol};`;
+    }
 
     // Gender queries
     if (q.includes('gender') || q.includes('sex')) {
@@ -459,7 +501,7 @@ function App() {
       const genderCol = getColumnName('gender') || 'Gender';
       const nameCol = getColumnName('first_name') || getColumnName('name') || 'First_Name';
       if (name) {
-        return `SELECT ${genderCol}\nFROM ${tableName}\nWHERE LOWER(${nameCol}) = '${name.toLowerCase()}';`;
+        return `SELECT ${genderCol}\nFROM ${tableName}\nWHERE ${nameCol} = '${name}';`;
       }
       return `SELECT ${genderCol}, COUNT(*) as count\nFROM ${tableName}\nGROUP BY ${genderCol};`;
     }
@@ -470,7 +512,7 @@ function App() {
       const ageCol = getColumnName('age') || 'Age';
       const nameCol = getColumnName('first_name') || getColumnName('name') || 'First_Name';
       if (name) {
-        return `SELECT ${ageCol}\nFROM ${tableName}\nWHERE LOWER(${nameCol}) = '${name.toLowerCase()}';`;
+        return `SELECT ${ageCol}\nFROM ${tableName}\nWHERE ${nameCol} = '${name}';`;
       }
       if (q.includes('average')) {
         return `SELECT AVG(${ageCol}) as average_age\nFROM ${tableName};`;
@@ -492,7 +534,7 @@ function App() {
       const nameCol = getColumnName('first_name') || getColumnName('name') || 'First_Name';
       if (q.includes('start')) {
         const letter = q.match(/start\s+with\s+(\w)/i)?.[1] || '';
-        return `SELECT ${nameCol}\nFROM ${tableName}\nWHERE ${nameCol} LIKE '${letter}%';`;
+        return `SELECT ${nameCol}\nFROM ${tableName}\nWHERE ${nameCol} LIKE '${letter.toUpperCase()}%';`;
       }
       return `SELECT ${nameCol}\nFROM ${tableName}\nORDER BY ${nameCol};`;
     }
@@ -502,9 +544,19 @@ function App() {
       const name = extractName(q);
       const nameCol = getColumnName('first_name') || getColumnName('name') || 'First_Name';
       if (name) {
-        return `SELECT *\nFROM ${tableName}\nWHERE LOWER(${nameCol}) = '${name.toLowerCase()}';`;
+        return `SELECT *\nFROM ${tableName}\nWHERE ${nameCol} = '${name}';`;
       }
       return `SELECT *\nFROM ${tableName};`;
+    }
+
+    // Direct name = value queries
+    const directNameMatch = q.match(/where\s+\w+\s*=\s*['"]?(\w+)['"]?/i);
+    if (directNameMatch) {
+      const name = capitalizeFirstLetter(directNameMatch[1]);
+      const nameCol = getColumnName('first_name') || getColumnName('name') || 'First_Name';
+      const requestedCol = q.match(/select\s+(\w+)/i)?.[1];
+      const col = requestedCol ? getColumnName(requestedCol) || requestedCol : '*';
+      return `SELECT ${col}\nFROM ${tableName}\nWHERE ${nameCol} = '${name}';`;
     }
 
     // List all query
@@ -516,9 +568,17 @@ function App() {
     return `SELECT *\nFROM ${tableName}\nLIMIT 10;`;
   };
 
-  const generateExcelFormula = (question: string, schema: DataSchema): string => {
+  const generateExcelFormula = (question: string, schema: DataSchema): string | null => {
     const q = question.toLowerCase();
     
+    // Check if it's a visualization-only query
+    const isVisualizationQuery = (q.includes('display') || q.includes('show') || q.includes('visualize')) &&
+      (q.includes('first') || q.includes('top') || q.includes('chart') || q.includes('graph'));
+    
+    if (isVisualizationQuery) {
+      return null;
+    }
+
     // Helper to get column letter
     const getColumnLetter = (colName: string): string => {
       const colIndex = schema.columns.findIndex(col => 
@@ -527,11 +587,28 @@ function App() {
       return colIndex >= 0 ? String.fromCharCode(65 + colIndex) : 'A';
     };
 
-    // Extract name from question if present
+    // Extract name and capitalize it properly
     const extractName = (q: string): string => {
-      const nameMatch = q.match(/of\s+(\w+)/i) || q.match(/for\s+(\w+)/i);
-      return nameMatch ? nameMatch[1].toLowerCase() : '';
+      const nameMatch = q.match(/of\s+(\w+)/i) || q.match(/for\s+(\w+)/i) || 
+                       q.match(/=\s*['"]?(\w+)['"]?/i) || q.match(/is\s+(\w+)/i);
+      return nameMatch ? capitalizeFirstLetter(nameMatch[1]) : '';
     };
+
+    // Country queries
+    if (q.includes('country')) {
+      const name = extractName(q);
+      const countryCol = getColumnLetter(schema.columns.find(col => 
+        col.name.toLowerCase() === 'country'
+      )?.name || 'Country');
+      const nameCol = getColumnLetter(schema.columns.find(col => 
+        col.name.toLowerCase() === 'first_name' || col.name.toLowerCase() === 'name'
+      )?.name || 'First_Name');
+      
+      if (name) {
+        return `=VLOOKUP("${name}", ${nameCol}:${countryCol}, ${countryCol.charCodeAt(0) - nameCol.charCodeAt(0) + 1}, FALSE)`;
+      }
+      return `=UNIQUE(${countryCol}:${countryCol})`;
+    }
 
     // Gender queries
     if (q.includes('gender') || q.includes('sex')) {
@@ -568,43 +645,148 @@ function App() {
       return `=FREQUENCY(${ageCol}:${ageCol}, ${ageCol}:${ageCol})`;
     }
 
-    // Count queries
-    if (q.includes('how many')) {
-      if (q.includes('gender') || q.includes('sex')) {
-        const genderCol = getColumnLetter(schema.columns.find(col => 
-          col.name.toLowerCase() === 'gender'
-        )?.name || 'Gender');
-        return `=COUNTIFS(${genderCol}:${genderCol}, {"Male", "Female"})`;
+    // Direct column lookup queries
+    const directNameMatch = q.match(/where\s+\w+\s*=\s*['"]?(\w+)['"]?/i);
+    if (directNameMatch) {
+      const name = capitalizeFirstLetter(directNameMatch[1]);
+      const requestedCol = q.match(/select\s+(\w+)/i)?.[1];
+      if (requestedCol) {
+        const targetCol = getColumnLetter(requestedCol);
+        const nameCol = getColumnLetter(schema.columns.find(col => 
+          col.name.toLowerCase() === 'first_name' || col.name.toLowerCase() === 'name'
+        )?.name || 'First_Name');
+        return `=VLOOKUP("${name}", ${nameCol}:${targetCol}, ${targetCol.charCodeAt(0) - nameCol.charCodeAt(0) + 1}, FALSE)`;
       }
-      return `=COUNTA(A:A)-1`;  // -1 to exclude header
-    }
-
-    // Name queries
-    if (q.includes('name')) {
-      const nameCol = getColumnLetter(schema.columns.find(col => 
-        col.name.toLowerCase() === 'first_name' || col.name.toLowerCase() === 'name'
-      )?.name || 'First_Name');
-      if (q.includes('start')) {
-        const letter = q.match(/start\s+with\s+(\w)/i)?.[1] || '';
-        return `=FILTER(${nameCol}:${nameCol}, LEFT(${nameCol}:${nameCol},1)="${letter}")`;
-      }
-      return `=SORT(${nameCol}:${nameCol})`;
-    }
-
-    // Details queries
-    if (q.includes('details')) {
-      const name = extractName(q);
-      const nameCol = getColumnLetter(schema.columns.find(col => 
-        col.name.toLowerCase() === 'first_name' || col.name.toLowerCase() === 'name'
-      )?.name || 'First_Name');
-      if (name) {
-        return `=FILTER(A:Z, ${nameCol}:${nameCol}="${name}")`;
-      }
-      return `=A:Z`;
     }
 
     // Default formula
     return `=FILTER(A:Z, A:A<>"")`;
+  };
+
+  const generateComparisonData = (question: string, data: any[]): { chartData: any[], chartType: 'bar' | 'pie' | 'line' | null, chartTitle: string, chartSubtitle: string } | null => {
+    const q = question.toLowerCase();
+    
+    // Extract the attribute being compared (e.g., salary, age)
+    let attribute = '';
+    if (q.includes('salary') || q.includes('salaries')) attribute = 'Salary';
+    else if (q.includes('age') || q.includes('ages')) attribute = 'Age';
+    else if (q.includes('gender')) attribute = 'Gender';
+    else if (q.includes('country')) attribute = 'Country';
+    else if (q.includes('id')) attribute = 'ID';
+
+    // Check for different types of comparison queries
+    const isComparisonQuery = q.includes('comparison') || q.includes('compare') || 
+                             q.includes('vs') || q.includes('versus') || 
+                             q.includes('show') || q.includes('display') ||
+                             q.includes('first') || q.includes('top') ||
+                             (q.includes('and') && attribute);
+
+    if (isComparisonQuery && attribute) {
+      let comparisonData: any[] = [];
+
+      // Handle specific row-based queries
+      const rowMatch = q.match(/first\s+(\d+)|top\s+(\d+)|(\d+)\s+(?:rows|people|entries)/i);
+      const numRows = rowMatch ? parseInt(rowMatch[1] || rowMatch[2] || rowMatch[3]) : 5;
+
+      if (q.includes('first') || q.includes('top') || 
+          q.includes('rows') || q.includes('people') || q.includes('entries')) {
+        comparisonData = data.slice(0, numRows).map(row => ({
+          name: row.First_Name || row.Name,
+          value: typeof row[attribute] === 'number' ? row[attribute] : 0
+        }));
+      } 
+      // Handle name-based comparisons
+      else {
+        // Extract names being compared - handle both full names and first names
+        const allNames = data.map(row => ({
+          fullName: row.First_Name || row.Name,
+          firstName: (row.First_Name || row.Name).split(' ')[0]
+        }));
+
+        // Find mentioned names in the question
+        const mentionedNames = allNames.filter(nameObj => 
+          q.toLowerCase().includes(nameObj.fullName.toLowerCase()) || 
+          q.toLowerCase().includes(nameObj.firstName.toLowerCase())
+        );
+
+        // Get unique names (in case of duplicates)
+        const uniqueNames = Array.from(new Set(mentionedNames.map(n => n.fullName)));
+
+        if (uniqueNames.length >= 2) {
+          comparisonData = data.filter(row => 
+            uniqueNames.includes(row.First_Name || row.Name)
+          ).map(row => ({
+            name: row.First_Name || row.Name,
+            value: typeof row[attribute] === 'number' ? row[attribute] : 0
+          }));
+        }
+      }
+
+      if (comparisonData.length > 0) {  // Changed from >= 2 to > 0 to handle single row cases
+        // Sort data by value for better visualization
+        comparisonData.sort((a, b) => b.value - a.value);
+
+        // Format values based on attribute type
+        const formattedData = comparisonData.map(item => ({
+          ...item,
+          displayValue: attribute === 'Salary' 
+            ? `$${item.value.toLocaleString()}`
+            : item.value.toString()
+        }));
+
+        let subtitle = '';
+        if (q.includes('first') || q.includes('top') || 
+            q.includes('rows') || q.includes('people') || q.includes('entries')) {
+          subtitle = `Showing ${formattedData.length} entries`;
+        } else {
+          subtitle = `Comparing ${formattedData.map(d => d.name).join(' and ')}`;
+        }
+
+        return {
+          chartData: formattedData,
+          chartType: 'bar',
+          chartTitle: `${attribute} ${formattedData.length > 1 ? 'Comparison' : 'Display'}`,
+          chartSubtitle: subtitle
+        };
+      }
+    }
+
+    return null;
+  };
+
+  const formatResponse = (answer: string, data: any[]): string => {
+    // Remove asterisks and format the response
+    let formattedAnswer = answer.replace(/\*\*/g, '');
+
+    // Split into sentences
+    const sentences = formattedAnswer.split(/(?<=[.!?])\s+/);
+    
+    // Group related information
+    const paragraphs: string[] = [];
+    let currentParagraph: string[] = [];
+
+    sentences.forEach((sentence) => {
+      if (sentence.toLowerCase().includes('according to') || 
+          sentence.toLowerCase().includes('in short') ||
+          sentence.toLowerCase().includes('is there anything') ||
+          sentence.toLowerCase().startsWith('would you')) {
+        if (currentParagraph.length > 0) {
+          paragraphs.push(currentParagraph.join(' '));
+          currentParagraph = [];
+        }
+        currentParagraph.push(sentence);
+      } else {
+        currentParagraph.push(sentence);
+      }
+    });
+
+    // Add any remaining sentences
+    if (currentParagraph.length > 0) {
+      paragraphs.push(currentParagraph.join(' '));
+    }
+
+    // Join paragraphs with double line breaks
+    return paragraphs.join('\n\n');
   };
 
   const handleQuerySubmit = async (e: React.FormEvent) => {
@@ -616,55 +798,49 @@ function App() {
     setIsAnalyzing(true);
 
     try {
-      // Get table name from uploaded file (remove extension and special characters)
+      // Get table name from uploaded file
       const tableName = uploadedFile.name
-        .replace(/\.[^/.]+$/, "") // Remove file extension
-        .replace(/[^a-zA-Z0-9_]/g, "_") // Replace special characters with underscore
+        .replace(/\.[^/.]+$/, "")
+        .replace(/[^a-zA-Z0-9_]/g, "_")
         .toLowerCase();
 
-      // Handle greeting messages directly without calling LLM
-      const greetings = ['hi', 'hello', 'hey', 'greetings'];
-      if (greetings.includes(query.toLowerCase().trim())) {
-        const greetingResponse = {
-          role: 'assistant' as const,
-          content: "Hello! I'm your data analysis assistant. You can ask me questions about your data, and I'll help you analyze it. For example, try asking about specific columns, averages, trends, or distributions in your data."
-        };
-        setConversation(prev => [...prev, greetingResponse]);
-        setQueryResult({
-          answer: greetingResponse.content,
-          sqlQuery: '',
-          needsChart: false,
-          chartType: null,
-          chartDataColumn: '',
-          excelFormula: ''
-        });
-        
-        setQuery('');
-        setIsAnalyzing(false);
-        return;
-      }
-
-      // First get LLM response
+      // First check if this is a comparison or display query that needs a chart
+      const comparisonData = generateComparisonData(query, data);
+      
+      // Then get LLM response
       const result = await analyzeDataWithAI(query, schema, data);
+      
+      // Format the response
+      const formattedAnswer = formatResponse(result.answer, data);
       
       // Add assistant's response to conversation
       setConversation(prev => [...prev, {
         role: 'assistant',
-        content: result.answer
+        content: formattedAnswer
       }]);
 
       // Generate SQL query and Excel formula
       const sqlQuery = generateSqlQuery(query, tableName, schema);
       const excelFormula = generateExcelFormula(query, schema);
 
-      // Update query result
+      // Update query result with comparison data if available
       setQueryResult({
         ...result,
-        answer: result.answer,
-        sqlQuery: sqlQuery,
-        chartType: result.chartType,
-        excelFormula: excelFormula || '' // Ensure excelFormula is never undefined
+        answer: formattedAnswer,
+        sqlQuery: sqlQuery || 'This type of visualization query does not generate a SQL query.',
+        needsChart: comparisonData !== null,
+        chartType: comparisonData?.chartType || result.chartType,
+        chartData: comparisonData?.chartData || result.chartData,
+        chartTitle: comparisonData?.chartTitle || result.chartTitle,
+        chartSubtitle: comparisonData?.chartSubtitle || result.chartSubtitle,
+        chartDataColumn: result.chartDataColumn,
+        excelFormula: excelFormula || 'This type of visualization query does not generate an Excel formula.'
       });
+
+      // If it's a comparison query, automatically set chart type to bar
+      if (comparisonData) {
+        setChartType('bar');
+      }
 
       setQuery('');
     } catch (error) {
@@ -1038,8 +1214,7 @@ function App() {
   };
 
   const handleSelectSession = async (session: HistorySession) => {
-    // Load session data
-    setUploadedFile(null); // Clear current file
+    setUploadedFile(null);
     setSchema(session.file.schema);
     setConversation(session.conversation);
     setQueryResult(session.queries[session.queries.length - 1] || null);
@@ -1048,8 +1223,10 @@ function App() {
   };
 
   const handleDeleteSession = async (sessionId: string) => {
+    if (!user) return;
+    
     try {
-      await historyService.deleteSession(sessionId);
+      await historyService.deleteSession(user.uid, sessionId);
       setSessions(sessions.filter(s => s.id !== sessionId));
       if (currentSessionId === sessionId) {
         setCurrentSessionId(null);
@@ -1064,10 +1241,10 @@ function App() {
   };
 
   const handleNewChat = async () => {
-    // Save current session if exists
-    if (currentSessionId && conversation.length > 0) {
+    if (user && currentSessionId && conversation.length > 0) {
       try {
         await historyService.updateSession(
+          user.uid,
           currentSessionId,
           conversation,
           queryResult ? [queryResult] : []
@@ -1077,7 +1254,6 @@ function App() {
       }
     }
 
-    // Reset the application state
     setUploadedFile(null);
     setSchema(null);
     setData([]);
@@ -1158,7 +1334,7 @@ function App() {
               )}
               <div className="flex items-center gap-2">
                 {queryResult && (
-                  <button
+                <button
                     onClick={generatePDF}
                     className={`flex items-center px-2 sm:px-4 py-1 sm:py-2 rounded-lg text-xs sm:text-sm font-medium ${
                       darkMode
@@ -1352,55 +1528,55 @@ function App() {
                     </h3>
                     <div className={`overflow-x-auto ${darkMode ? 'bg-gray-900' : 'bg-gray-50'} rounded-lg p-4`}>
                       <div className="max-h-[500px] overflow-y-auto custom-scrollbar">
-                        <table className="min-w-full divide-y divide-gray-200">
+                      <table className="min-w-full divide-y divide-gray-200">
                           <thead className="sticky top-0 z-10 bg-inherit">
-                            <tr>
+                          <tr>
                               <th className={`px-4 py-2 text-left text-xs font-medium ${darkMode ? 'text-gray-400' : 'text-gray-500'} uppercase tracking-wider w-10 bg-inherit`}>
-                                Actions
-                              </th>
-                              {schema.columns.map((column, index) => (
-                                <th
-                                  key={index}
+                              Actions
+                            </th>
+                            {schema.columns.map((column, index) => (
+                              <th
+                                key={index}
                                   className={`px-4 py-2 text-left text-xs font-medium ${darkMode ? 'text-gray-400' : 'text-gray-500'} uppercase tracking-wider bg-inherit`}
+                              >
+                                {column.name}
+                              </th>
+                            ))}
+                          </tr>
+                        </thead>
+                        <tbody className={`divide-y ${darkMode ? 'divide-gray-700' : 'divide-gray-200'}`}>
+                            {data.map((row, rowIndex) => (
+                            <tr key={rowIndex} className={darkMode ? 'hover:bg-gray-800' : 'hover:bg-gray-100'}>
+                              <td className={`px-4 py-2 text-sm whitespace-nowrap ${darkMode ? 'text-gray-200' : 'text-gray-900'}`}>
+                                <button
+                                  onClick={() => copyRowToClipboard(row, rowIndex)}
+                                  className={`p-1.5 rounded-full transition-colors ${
+                                    darkMode 
+                                      ? 'hover:bg-gray-700 focus:bg-gray-700' 
+                                      : 'hover:bg-gray-200 focus:bg-gray-200'
+                                  }`}
+                                  title="Copy Row Data"
                                 >
-                                  {column.name}
-                                </th>
+                                  {copiedRow === rowIndex ? (
+                                    <Check className="h-4 w-4 text-green-500" />
+                                  ) : (
+                                    <Copy className={`h-4 w-4 ${darkMode ? 'text-gray-400' : 'text-gray-600'}`} />
+                                  )}
+                                </button>
+                              </td>
+                              {schema.columns.map((column, colIndex) => (
+                                <td
+                                  key={colIndex}
+                                  className={`px-4 py-2 text-sm whitespace-nowrap ${darkMode ? 'text-gray-200' : 'text-gray-900'}`}
+                                >
+                                  {row[column.name]?.toString()}
+                                </td>
                               ))}
                             </tr>
-                          </thead>
-                          <tbody className={`divide-y ${darkMode ? 'divide-gray-700' : 'divide-gray-200'}`}>
-                            {data.map((row, rowIndex) => (
-                              <tr key={rowIndex} className={darkMode ? 'hover:bg-gray-800' : 'hover:bg-gray-100'}>
-                                <td className={`px-4 py-2 text-sm whitespace-nowrap ${darkMode ? 'text-gray-200' : 'text-gray-900'}`}>
-                                  <button
-                                    onClick={() => copyRowToClipboard(row, rowIndex)}
-                                    className={`p-1.5 rounded-full transition-colors ${
-                                      darkMode 
-                                        ? 'hover:bg-gray-700 focus:bg-gray-700' 
-                                        : 'hover:bg-gray-200 focus:bg-gray-200'
-                                    }`}
-                                    title="Copy Row Data"
-                                  >
-                                    {copiedRow === rowIndex ? (
-                                      <Check className="h-4 w-4 text-green-500" />
-                                    ) : (
-                                      <Copy className={`h-4 w-4 ${darkMode ? 'text-gray-400' : 'text-gray-600'}`} />
-                                    )}
-                                  </button>
-                                </td>
-                                {schema.columns.map((column, colIndex) => (
-                                  <td
-                                    key={colIndex}
-                                    className={`px-4 py-2 text-sm whitespace-nowrap ${darkMode ? 'text-gray-200' : 'text-gray-900'}`}
-                                  >
-                                    {row[column.name]?.toString()}
-                                  </td>
-                                ))}
-                              </tr>
-                            ))}
-                          </tbody>
-                        </table>
-                      </div>
+                          ))}
+                        </tbody>
+                      </table>
+                          </div>
                     </div>
                   </div>
                 </div>
@@ -1606,13 +1782,28 @@ function App() {
 
                       {/* Excel Formula Section */}
                       {queryResult.excelFormula && (
-                        <div className={`p-3 sm:p-4 rounded-lg border ${darkMode ? 'bg-gray-900 border-gray-700' : 'bg-gradient-to-r from-indigo-50 to-purple-50 border-indigo-100'}`}>
+                        <div className={`p-3 sm:p-4 rounded-lg border relative ${darkMode ? 'bg-gray-900 border-gray-700' : 'bg-gradient-to-r from-indigo-50 to-purple-50 border-indigo-100'}`}>
                           <h3 className={`text-xs sm:text-sm font-medium mb-1.5 sm:mb-2 ${darkMode ? 'text-gray-300' : 'text-gray-700'}`}>
                             Excel Formula
                           </h3>
-                          <p className={`text-xs sm:text-sm ${darkMode ? 'text-gray-200' : 'text-gray-700'}`}>
+                          <p className={`text-xs sm:text-sm font-mono ${darkMode ? 'text-gray-200' : 'text-gray-700'}`}>
                             {queryResult.excelFormula}
                           </p>
+                          <button
+                            onClick={() => copyToClipboard(queryResult.excelFormula, 'excel')}
+                            className={`absolute top-1 sm:top-2 right-1 sm:right-2 p-1 sm:p-1.5 rounded-full transition-colors ${
+                              darkMode 
+                                ? 'hover:bg-gray-600' 
+                                : 'hover:bg-gray-200'
+                            }`}
+                            title="Copy Excel Formula"
+                          >
+                            {copiedExcel ? (
+                              <Check className="h-3 w-3 sm:h-4 sm:w-4 text-green-500" />
+                            ) : (
+                              <Copy className={`h-3 w-3 sm:h-4 sm:w-4 ${darkMode ? 'text-gray-400' : 'text-gray-600'}`} />
+                            )}
+                          </button>
                         </div>
                       )}
                     </div>

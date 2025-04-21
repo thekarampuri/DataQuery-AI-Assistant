@@ -1,7 +1,6 @@
 import { DataSchema } from '../utils/api';
 
 export interface FileMetadata {
-  id: string;
   name: string;
   uploadDate: Date;
   schema: DataSchema;
@@ -23,7 +22,7 @@ export interface QueryResult {
   answer: string;
   sqlQuery: string;
   needsChart: boolean;
-  chartType: string | null;
+  chartType: 'pie' | 'bar' | 'line' | null;
   chartData?: Array<{ name: string; value: number }>;
   chartDataColumn?: string;
   executionTime?: number;
@@ -37,8 +36,8 @@ export interface HistorySession {
   id: string;
   userId: string;
   file: FileMetadata;
-  conversation: ConversationMessage[];
-  queries: QueryResult[];
+  conversation: Array<{ role: 'user' | 'assistant'; content: string }>;
+  queries: Array<QueryResult>;
   createdAt: Date;
   lastUpdated: Date;
   title: string;
