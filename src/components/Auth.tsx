@@ -9,6 +9,7 @@ import {
   GoogleAuthProvider,
   signInAnonymously
 } from 'firebase/auth';
+import { useNavigate } from 'react-router-dom';
 
 interface AuthProps {
   darkMode: boolean;
@@ -27,6 +28,7 @@ const Auth: React.FC<AuthProps> = ({ darkMode, onClose, initialMode }) => {
   const [loading, setLoading] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
+  const navigate = useNavigate();
 
   const handleReset = () => {
     setFirstName('');
@@ -62,6 +64,7 @@ const Auth: React.FC<AuthProps> = ({ darkMode, onClose, initialMode }) => {
       if (mode === 'login') {
         await signInWithEmailAndPassword(auth, email, password);
         onClose();
+        navigate('/home');
       } else {
         if (!validateSignupForm()) {
           setLoading(false);
@@ -72,6 +75,7 @@ const Auth: React.FC<AuthProps> = ({ darkMode, onClose, initialMode }) => {
           displayName: `${firstName} ${lastName}`
         });
         onClose();
+        navigate('/home');
       }
     } catch (err: any) {
       setError(err.message || 'An error occurred');
@@ -88,6 +92,7 @@ const Auth: React.FC<AuthProps> = ({ darkMode, onClose, initialMode }) => {
       const provider = new GoogleAuthProvider();
       await signInWithPopup(auth, provider);
       onClose();
+      navigate('/home');
     } catch (err: any) {
       let errorMessage = 'Google sign-in failed. Please try again.';
       if (err.code === 'auth/popup-closed-by-user') {
@@ -106,6 +111,7 @@ const Auth: React.FC<AuthProps> = ({ darkMode, onClose, initialMode }) => {
     try {
       await signInAnonymously(auth);
       onClose();
+      navigate('/home');
     } catch (err: any) {
       setError('Anonymous sign-in failed. Please try again.');
     } finally {

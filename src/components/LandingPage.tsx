@@ -1,25 +1,76 @@
 import React, { useState } from 'react';
 import { LogIn, User, Database } from 'lucide-react';
-import Auth from './Auth';
+import { useNavigate } from 'react-router-dom';
+import { auth } from '../config/firebase';
+import { 
+  signInWithEmailAndPassword, 
+  signInWithPopup, 
+  GoogleAuthProvider, 
+  signInAnonymously 
+} from 'firebase/auth';
 
 interface LandingPageProps {
   darkMode: boolean;
-  onGuestAccess?: () => void;
 }
 
-const LandingPage: React.FC<LandingPageProps> = ({ darkMode, onGuestAccess }) => {
-  const [authMode, setAuthMode] = useState<'none' | 'signin' | 'signup'>('none');
+const LandingPage: React.FC<LandingPageProps> = ({ darkMode }) => {
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [error, setError] = useState('');
+  const [loading, setLoading] = useState(false);
+  const navigate = useNavigate();
 
-  // If auth mode is selected, show the Auth component
-  if (authMode !== 'none') {
-    return (
-      <Auth 
-        initialMode={authMode === 'signin' ? 'login' : 'signup'} 
-        onClose={() => setAuthMode('none')}
-        darkMode={darkMode}
-      />
-    );
-  }
+  const handleLogin = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setError('');
+    setLoading(true);
+
+    try {
+      await signInWithEmailAndPassword(auth, email, password);
+      navigate('/home');
+    } catch (err: any) {
+      setError(err.message || 'An error occurred');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleGoogleSignIn = async () => {
+    setError('');
+    setLoading(true);
+
+    try {
+      const provider = new GoogleAuthProvider();
+      await signInWithPopup(auth, provider);
+      navigate('/home');
+    } catch (err: any) {
+      let errorMessage = 'Google sign-in failed. Please try again.';
+      if (err.code === 'auth/popup-closed-by-user') {
+        errorMessage = 'Sign-in cancelled. Please try again.';
+      }
+      setError(errorMessage);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleGuestAccess = async () => {
+    setError('');
+    setLoading(true);
+    
+    try {
+      await signInAnonymously(auth);
+      navigate('/home');
+    } catch (error: any) {
+      setError(error.message || 'Anonymous sign-in failed. Please try again.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleRegister = () => {
+    navigate('/register');
+  };
 
   return (
     <div className={`min-h-screen ${darkMode ? 'bg-gray-900' : 'bg-white'} font-['Inter', system-ui, sans-serif]`}>
@@ -36,18 +87,27 @@ const LandingPage: React.FC<LandingPageProps> = ({ darkMode, onGuestAccess }) =>
               </p>
             </div>
 
-            <div className="space-y-5">
+            {error && (
+              <div className="mb-6 p-3 rounded-lg bg-red-100 border border-red-300 text-red-700 text-base">
+                {error}
+              </div>
+            )}
+
+            <form onSubmit={handleLogin} className="space-y-5">
               <div>
-                <label htmlFor="username" className={`block text-base font-medium mb-2 ${darkMode ? 'text-gray-300' : 'text-gray-700'}`}>
-                  Username
+                <label htmlFor="email" className={`block text-base font-medium mb-2 ${darkMode ? 'text-gray-300' : 'text-gray-700'}`}>
+                  Email
                 </label>
                 <input
-                  type="text"
-                  id="username"
+                  type="email"
+                  id="email"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
                   className={`w-full px-4 py-3 rounded-lg border text-base ${
                     darkMode ? 'bg-gray-800 border-gray-700 text-white' : 'bg-white border-gray-200 text-gray-900'
                   } focus:ring-2 focus:ring-indigo-500 focus:border-transparent`}
-                  placeholder="Username"
+                  placeholder="Email address"
+                  required
                 />
               </div>
 
@@ -58,10 +118,13 @@ const LandingPage: React.FC<LandingPageProps> = ({ darkMode, onGuestAccess }) =>
                 <input
                   type="password"
                   id="password"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
                   className={`w-full px-4 py-3 rounded-lg border text-base ${
                     darkMode ? 'bg-gray-800 border-gray-700 text-white' : 'bg-white border-gray-200 text-gray-900'
                   } focus:ring-2 focus:ring-indigo-500 focus:border-transparent`}
                   placeholder="Password"
+                  required
                 />
               </div>
 
@@ -75,10 +138,19 @@ const LandingPage: React.FC<LandingPageProps> = ({ darkMode, onGuestAccess }) =>
               </div>
 
               <button
-                onClick={() => setAuthMode('signin')}
+                type="submit"
+                disabled={loading}
                 className="w-full px-4 py-3.5 rounded-lg text-white bg-indigo-600 hover:bg-indigo-700 font-medium transition-colors text-base sm:text-lg flex items-center justify-center"
               >
-                <LogIn className="mr-2 h-5 w-5" /> Login
+                {loading ? (
+                  <svg className="animate-spin -ml-1 mr-2 h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                  </svg>
+                ) : (
+                  <LogIn className="mr-2 h-5 w-5" />
+                )}
+                {loading ? 'Signing in...' : 'Login'}
               </button>
 
               <div className="relative flex items-center py-3">
@@ -89,7 +161,9 @@ const LandingPage: React.FC<LandingPageProps> = ({ darkMode, onGuestAccess }) =>
 
               <div className="flex justify-center">
                 <button 
-                  onClick={() => setAuthMode('signin')}
+                  type="button"
+                  onClick={handleGoogleSignIn}
+                  disabled={loading}
                   className={`flex items-center justify-center p-3 px-5 rounded-lg ${
                     darkMode ? 'bg-gray-800 hover:bg-gray-700' : 'bg-white hover:bg-gray-50'
                   } border ${darkMode ? 'border-gray-700' : 'border-gray-200'} transition-colors`}
@@ -119,26 +193,26 @@ const LandingPage: React.FC<LandingPageProps> = ({ darkMode, onGuestAccess }) =>
               <div className="text-center mt-6">
                 <p className={`text-base ${darkMode ? 'text-gray-400' : 'text-gray-600'}`}>
                   Not a member? {' '}
-                  <button 
-                    onClick={() => setAuthMode('signup')}
+                  <a 
+                    href="/register"
                     className={`font-medium ${darkMode ? 'text-indigo-400 hover:text-indigo-300' : 'text-indigo-600 hover:text-indigo-500'}`}
                   >
                     Register now
-                  </button>
+                  </a>
                 </p>
               </div>
 
-              {onGuestAccess && (
-                <div className="text-center mt-4">
-                  <button 
-                    onClick={onGuestAccess}
-                    className={`text-base font-medium ${darkMode ? 'text-gray-400 hover:text-gray-300' : 'text-gray-600 hover:text-gray-500'}`}
-                  >
-                    Continue as Guest
-                  </button>
-                </div>
-              )}
-            </div>
+              <div className="text-center mt-4">
+                <button 
+                  type="button"
+                  onClick={handleGuestAccess}
+                  disabled={loading}
+                  className={`text-base font-medium ${darkMode ? 'text-gray-400 hover:text-gray-300' : 'text-gray-600 hover:text-gray-500'}`}
+                >
+                  Continue as Guest
+                </button>
+              </div>
+            </form>
           </div>
         </div>
 

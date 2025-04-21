@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Upload, Database, FileSpreadsheet, PieChart, Download, Send, Table, ChevronLeft, ChevronRight, Moon, Sun, Copy, Check, BarChart, LineChart, Mic, MicOff, Volume1, Volume2, Book, Home, User, LogIn } from 'lucide-react';
+import { Upload, Database, FileSpreadsheet, PieChart, Download, Send, Table, ChevronLeft, ChevronRight, Moon, Sun, Copy, Check, BarChart, LineChart, Mic, MicOff, Volume1, Volume2, Book, Home, User, LogOut } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import ChartComponent from './components/ChartComponent';
 import jsPDF from 'jspdf';
@@ -9,11 +9,10 @@ import DataVisualization from './components/DataVisualization';
 import Education from './components/Education';
 import { analyzeDataWithAI } from './utils/gemini';
 import { parseCSVToJSON } from './utils/csvParser';
-import Auth from './components/Auth';
-import LandingPage from './components/LandingPage';
 import { useAuth } from './hooks/useAuth';
 import { auth } from './config/firebase';
 import { signOut } from 'firebase/auth';
+import { useNavigate } from 'react-router-dom';
 
 // Add these types before the App function
 type SqlType = 'MySQL';
@@ -266,11 +265,8 @@ function App() {
   const [customTableName, setCustomTableName] = useState<string>('');
   const [selectedSqlType, setSelectedSqlType] = useState<SqlType>('MySQL');
   const [showEducation, setShowEducation] = useState(false);
-  const [showAuth, setShowAuth] = useState(false);
-  const [isAuthenticated, setIsAuthenticated] = useState(false);
-  const [showLandingPage, setShowLandingPage] = useState(true);
-  const [isGuest, setIsGuest] = useState(false);
-  const { user, loading, isAuthenticated: authIsAuthenticated } = useAuth();
+  const { user } = useAuth();
+  const navigate = useNavigate();
 
   useEffect(() => {
     const timer = setTimeout(() => {
@@ -879,26 +875,15 @@ function App() {
     setShowSqlQueries(true);
   };
 
-  // Handle guest access
-  const handleGuestAccess = () => {
-    setShowLandingPage(false);
-    setIsGuest(true);
-  };
-
   // Add sign out handler
   const handleSignOut = async () => {
     try {
       await signOut(auth);
-      setShowLandingPage(true);
+      navigate('/login');
     } catch (error) {
       console.error('Error signing out:', error);
     }
   };
-
-  // Show landing page if not authenticated
-  if (!loading && !authIsAuthenticated && showLandingPage) {
-    return <LandingPage darkMode={darkMode} onGuestAccess={handleGuestAccess} />;
-  }
 
   return (
     <div className={`min-h-screen ${darkMode ? 'bg-gray-900' : 'bg-gradient-to-br from-indigo-50 via-purple-50 to-pink-50'}`}>
@@ -917,13 +902,13 @@ function App() {
               </div>
             </div>
             <div className="flex flex-wrap items-center gap-2">
-              {(user || isGuest) && (
+              {(user) && (
                 <div className={`flex items-center space-x-2 px-2 sm:px-4 py-1 sm:py-2 rounded-lg text-xs sm:text-sm ${
                   darkMode ? 'bg-gray-700 text-gray-200' : 'bg-gray-100 text-gray-600'
                 }`}>
                   <User className="h-3 w-3 sm:h-4 sm:w-4" />
                   <span className="font-medium truncate max-w-[120px] sm:max-w-none">
-                    {isGuest ? 'Guest' : (user?.displayName || user?.email)}
+                    {user?.displayName || user?.email}
                   </span>
                 </div>
               )}
@@ -950,19 +935,17 @@ function App() {
                   <Book className="h-3 w-3 sm:h-4 sm:w-4 mr-1 sm:mr-2" />
                   Learn
                 </button>
-                {(authIsAuthenticated || isGuest) && (
-                  <button
-                    onClick={handleSignOut}
-                    className={`p-2 rounded-lg ${
-                      darkMode
-                        ? 'bg-gray-700 hover:bg-gray-600 text-gray-200'
-                        : 'bg-gray-100 hover:bg-gray-200 text-gray-600'
-                    }`}
-                    title="Sign Out"
-                  >
-                    <LogIn className="h-4 w-4" />
-                  </button>
-                )}
+                <button
+                  onClick={handleSignOut}
+                  className={`p-2 rounded-lg ${
+                    darkMode
+                      ? 'bg-gray-700 hover:bg-gray-600 text-gray-200'
+                      : 'bg-gray-100 hover:bg-gray-200 text-gray-600'
+                  }`}
+                  title="Sign Out"
+                >
+                  <LogOut className="h-4 w-4" />
+                </button>
                 <button
                   onClick={() => setDarkMode(!darkMode)}
                   className={`p-1 sm:p-2 rounded-lg ${darkMode ? 'bg-gray-700 text-gray-200' : 'bg-gray-100 text-gray-600'} hover:opacity-80`}
