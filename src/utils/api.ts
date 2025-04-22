@@ -1,5 +1,3 @@
-import { QueryResult as HistoryQueryResult } from '../types/history';
-
 export interface DataSchema {
   tableName: string;
   columns: Array<{ name: string; type: string }>;
@@ -10,9 +8,18 @@ export interface Message {
   content: string;
 }
 
-export type QueryResult = Omit<HistoryQueryResult, 'timestamp'> & {
+export interface QueryResult {
+  answer: string;
+  sqlQuery: string;
+  needsChart: boolean;
+  chartType: 'pie' | 'bar' | 'line' | null;
+  chartData?: Array<{ name: string; value: number }>;
+  chartTitle?: string;
+  chartSubtitle?: string;
+  chartDataColumn?: string;
+  excelFormula?: string;
   timestamp: Date;
-};
+}
 
 // Helper function to calculate average
 const calculateAverage = (values: number[]): number => {

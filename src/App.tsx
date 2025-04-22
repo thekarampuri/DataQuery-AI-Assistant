@@ -15,12 +15,15 @@ import { auth } from './config/firebase';
 import { signOut } from 'firebase/auth';
 import { useNavigate } from 'react-router-dom';
 import HistorySidebar from './components/HistorySidebar';
-import { QueryResult, HistorySession, ConversationMessage } from './types/history';
+import { QueryResult, HistorySession, ConversationMessage, FileMetadata } from './types/history';
 import * as historyService from './services/historyService';
 import { createUserDocument } from './services/historyService';
 
-// Add these types before the App function
-type SqlType = 'MySQL';
+// Add type for column
+interface Column {
+  name: string;
+  type: string;
+}
 
 // Update jsPDF interface
 declare module 'jspdf' {
@@ -358,24 +361,6 @@ function App() {
     return () => unsubscribe();
   }, [navigate]);
 
-  // Update the conversation state initialization in useEffect
-  useEffect(() => {
-    if (user && currentSessionId) {
-      const loadSession = async () => {
-        try {
-          const session = await historyService.getSession(user.uid, currentSessionId);
-          if (session) {
-            setConversation(session.conversation);
-            setQueryResult(session.queries[session.queries.length - 1] || null);
-          }
-        } catch (error) {
-          console.error('Error loading session:', error);
-        }
-      };
-      loadSession();
-    }
-  }, [user, currentSessionId]);
-
   const copyRowToClipboard = async (row: any, rowIndex: number) => {
     const text = Object.entries(row)
       .map(([key, value]) => `${key}: ${value}`)
@@ -395,11 +380,12 @@ function App() {
   const updateChartData = (columnName: string) => {
     if (!data || !schema) return;
 
-    const column = schema.columns.find(col => col.name === columnName);
+    const column = schema.columns.find((col: Column) => col.name === columnName);
     if (!column) return;
 
     let transformedData: Array<{ name: string; value: number }>;
     if (column.type === 'number') {
+      // For numeric columns, show the distribution of values
       transformedData = data.map((row, index) => {
         const value = row[columnName];
         return {
@@ -408,6 +394,7 @@ function App() {
         };
       });
     } else {
+      // For non-numeric columns, count occurrences of each value
       const valueCounts = data.reduce((acc, row) => {
         const value = row[columnName]?.toString() || 'Unknown';
         acc[value] = (acc[value] || 0) + 1;
@@ -429,7 +416,7 @@ function App() {
       chartData: transformedData,
       chartDataColumn: columnName,
       excelFormula: '',
-      timestamp: new Date() // Add timestamp
+      timestamp: new Date()
     };
 
     setQueryResult(newQueryResult);
@@ -451,31 +438,25 @@ function App() {
       // Create new session when file is uploaded
       if (user) {
         try {
-          console.log('Creating new session with file:', file.name);
-          const sessionId = await historyService.createSession(user.uid, {
+          console.log('Creating new session for file:', file.name);
+          const fileMetadata: FileMetadata = {
             name: file.name,
             uploadDate: new Date(),
             schema: schema,
-            data: jsonData, // Store the complete data
+            data: jsonData,
             previewData: jsonData.slice(0, 10),
             totalRows: jsonData.length,
             fileType: file.type,
             fileSize: file.size
-          });
+          };
+
+          const sessionId = await historyService.createSession(user.uid, fileMetadata);
           console.log('Session created with ID:', sessionId);
           setCurrentSessionId(sessionId);
           
           // Refresh sessions list
           const userSessions = await historyService.getUserSessions(user.uid);
           setSessions(userSessions);
-
-          // Set initial conversation
-          const initialMessage: ConversationMessage = {
-            role: 'assistant',
-            content: `File "${file.name}" loaded successfully with ${jsonData.length} records.`,
-            timestamp: new Date()
-          };
-          setConversation([initialMessage]);
         } catch (error) {
           console.error('Error creating session:', error);
         }
@@ -502,7 +483,7 @@ function App() {
       const result = await analyzeData(query, schema, data);
       return {
         ...result,
-        timestamp: new Date() // Ensure timestamp is set
+        timestamp: new Date() // Add timestamp to the result
       };
     } catch (error) {
       console.error('Error analyzing query:', error);
@@ -871,9 +852,7 @@ function App() {
       content: query,
       timestamp: new Date()
     };
-
-    const updatedConversation = [...conversation, newMessage];
-    setConversation(updatedConversation);
+    setConversation(prev => [...prev, newMessage]);
     setIsAnalyzing(true);
 
     try {
@@ -892,22 +871,21 @@ function App() {
       // Format the response
       const formattedAnswer = formatResponse(result.answer, data);
       
-      // Add assistant's response to conversation
+      // Add assistant's response to conversation with timestamp
       const assistantMessage: ConversationMessage = {
         role: 'assistant',
         content: formattedAnswer,
         timestamp: new Date()
       };
-
-      const finalConversation = [...updatedConversation, assistantMessage];
-      setConversation(finalConversation);
+      const updatedConversation: ConversationMessage[] = [...conversation, newMessage, assistantMessage];
+      setConversation(updatedConversation);
 
       // Generate SQL query and Excel formula
       const sqlQuery = generateSqlQuery(query, tableName, schema);
       const excelFormula = generateExcelFormula(query, schema);
 
       // Create query result with timestamp
-      const queryResult: QueryResult = {
+      const newQueryResult: QueryResult = {
         answer: formattedAnswer,
         sqlQuery: sqlQuery || 'This type of visualization query does not generate a SQL query.',
         needsChart: comparisonData !== null,
@@ -921,18 +899,20 @@ function App() {
       };
 
       // Update query result state
-      setQueryResult(queryResult);
+      setQueryResult(newQueryResult);
 
       // Save to Firestore if we have a session
       if (user && currentSessionId) {
         try {
+          console.log('Updating session:', currentSessionId);
           await historyService.updateSession(
             user.uid,
             currentSessionId,
-            finalConversation,
-            [queryResult],
+            updatedConversation,
+            [newQueryResult],
             data // Pass the current data to keep it in sync
           );
+          console.log('Session updated successfully');
           
           // Refresh sessions list
           const userSessions = await historyService.getUserSessions(user.uid);
@@ -940,6 +920,13 @@ function App() {
         } catch (error) {
           console.error('Error updating session:', error);
         }
+      } else {
+        console.warn('No active session to save to:', { user, currentSessionId });
+      }
+
+      // If it's a comparison query, automatically set chart type to bar
+      if (comparisonData) {
+        setChartType('bar');
       }
 
       setQuery('');
@@ -955,11 +942,10 @@ function App() {
         content: errorMessage,
         timestamp: new Date()
       };
+      
+      setConversation(prev => [...prev, errorAssistantMessage]);
 
-      const finalConversation = [...updatedConversation, errorAssistantMessage];
-      setConversation(finalConversation);
-
-      setQueryResult({
+      const errorQueryResult: QueryResult = {
         answer: errorMessage,
         sqlQuery: '',
         needsChart: false,
@@ -967,7 +953,9 @@ function App() {
         chartDataColumn: '',
         excelFormula: '',
         timestamp: new Date()
-      });
+      };
+
+      setQueryResult(errorQueryResult);
     } finally {
       setIsAnalyzing(false);
     }
@@ -1314,17 +1302,10 @@ function App() {
   const handleSelectSession = async (session: HistorySession) => {
     setUploadedFile(null);
     setSchema(session.file.schema);
-    setData(session.file.data); // Load the complete data
     setConversation(session.conversation);
     setQueryResult(session.queries[session.queries.length - 1] || null);
     setCurrentSessionId(session.id);
     setIsHistorySidebarOpen(false);
-    
-    // Set initial selected column and chart data if available
-    if (session.file.schema.columns.length > 0) {
-      setSelectedColumn(session.file.schema.columns[0].name);
-      updateChartData(session.file.schema.columns[0].name);
-    }
   };
 
   const handleDeleteSession = async (sessionId: string) => {
