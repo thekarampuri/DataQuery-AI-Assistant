@@ -15,8 +15,9 @@ import { auth } from './config/firebase';
 import { signOut } from 'firebase/auth';
 import { useNavigate } from 'react-router-dom';
 import HistorySidebar from './components/HistorySidebar';
-import { QueryResult, HistorySession } from './types/history';
+import { QueryResult, HistorySession, ConversationMessage } from './types/history';
 import * as historyService from './services/historyService';
+import { createUserDocument } from './services/historyService';
 
 // Add these types before the App function
 type SqlType = 'MySQL';
@@ -180,7 +181,7 @@ function App() {
   const resultsRef = useRef<HTMLDivElement>(null);
   const rowsPerPage = 10;
   const [isAnalyzing, setIsAnalyzing] = useState(false);
-  const [conversation, setConversation] = useState<Array<{ role: 'user' | 'assistant'; content: string }>>([]);
+  const [conversation, setConversation] = useState<ConversationMessage[]>([]);
   const [chartType, setChartType] = useState<'pie' | 'bar' | 'line'>('pie');
   const [isListening, setIsListening] = useState(false);
   const [recognition, setRecognition] = useState<SpeechRecognition | null>(null);
@@ -284,23 +285,24 @@ function App() {
   // Create new session when file is uploaded
   useEffect(() => {
     const createNewSession = async () => {
-      if (user && uploadedFile && schema) {
+      if (user && uploadedFile && schema && !currentSessionId) {
         try {
-          const fileMetadata = {
-            name: uploadedFile.name,
-            uploadDate: new Date(),
-            schema
-          };
-
-          const sessionId = await historyService.createSession(user.uid, fileMetadata);
-          setCurrentSessionId(sessionId);
+          // Only update the current session if it exists
+          if (currentSessionId) {
+            await historyService.updateSession(
+              user.uid,
+              currentSessionId,
+              conversation,
+              queryResult ? [queryResult] : []
+            );
+          }
         } catch (error) {
-          console.error('Error creating session:', error);
+          console.error('Error updating session:', error);
         }
       }
     };
 
-    if (uploadedFile && schema && user && !currentSessionId) {
+    if (uploadedFile && schema && user) {
       createNewSession();
     }
   }, [uploadedFile, schema, user, currentSessionId]);
@@ -310,11 +312,22 @@ function App() {
     const updateCurrentSession = async () => {
       if (user && currentSessionId && queryResult) {
         try {
+          const timestampedConversation = conversation.map(msg => ({
+            ...msg,
+            timestamp: new Date()
+          }));
+
+          const timestampedQueries = queryResult ? [{
+            ...queryResult,
+            timestamp: new Date()
+          }] : [];
+
           await historyService.updateSession(
             user.uid,
             currentSessionId,
-            conversation,
-            [queryResult]
+            timestampedConversation,
+            timestampedQueries,
+            data // Pass the current data to keep it in sync
           );
         } catch (error) {
           console.error('Error updating session:', error);
@@ -325,19 +338,43 @@ function App() {
     if (conversation.length > 0) {
       updateCurrentSession();
     }
-  }, [conversation, queryResult, currentSessionId, user]);
+  }, [conversation, queryResult, currentSessionId, user, data]);
 
   // Check authentication on mount
   useEffect(() => {
-    const unsubscribe = auth.onAuthStateChanged((user) => {
+    const unsubscribe = auth.onAuthStateChanged(async (user) => {
       setIsLoading(false);
       if (!user) {
         navigate('/login');
+      } else {
+        // Create/update user document in Firestore
+        await createUserDocument(user.uid, {
+          name: user.displayName,
+          email: user.email
+        });
       }
     });
 
     return () => unsubscribe();
   }, [navigate]);
+
+  // Update the conversation state initialization in useEffect
+  useEffect(() => {
+    if (user && currentSessionId) {
+      const loadSession = async () => {
+        try {
+          const session = await historyService.getSession(user.uid, currentSessionId);
+          if (session) {
+            setConversation(session.conversation);
+            setQueryResult(session.queries[session.queries.length - 1] || null);
+          }
+        } catch (error) {
+          console.error('Error loading session:', error);
+        }
+      };
+      loadSession();
+    }
+  }, [user, currentSessionId]);
 
   const copyRowToClipboard = async (row: any, rowIndex: number) => {
     const text = Object.entries(row)
@@ -363,7 +400,6 @@ function App() {
 
     let transformedData: Array<{ name: string; value: number }>;
     if (column.type === 'number') {
-      // For numeric columns, show the distribution of values
       transformedData = data.map((row, index) => {
         const value = row[columnName];
         return {
@@ -372,7 +408,6 @@ function App() {
         };
       });
     } else {
-      // For non-numeric columns, count occurrences of each value
       const valueCounts = data.reduce((acc, row) => {
         const value = row[columnName]?.toString() || 'Unknown';
         acc[value] = (acc[value] || 0) + 1;
@@ -393,7 +428,8 @@ function App() {
       chartType: chartType,
       chartData: transformedData,
       chartDataColumn: columnName,
-      excelFormula: ''
+      excelFormula: '',
+      timestamp: new Date() // Add timestamp
     };
 
     setQueryResult(newQueryResult);
@@ -412,6 +448,39 @@ function App() {
       setData(jsonData);
       setCurrentPage(1);
       
+      // Create new session when file is uploaded
+      if (user) {
+        try {
+          console.log('Creating new session with file:', file.name);
+          const sessionId = await historyService.createSession(user.uid, {
+            name: file.name,
+            uploadDate: new Date(),
+            schema: schema,
+            data: jsonData, // Store the complete data
+            previewData: jsonData.slice(0, 10),
+            totalRows: jsonData.length,
+            fileType: file.type,
+            fileSize: file.size
+          });
+          console.log('Session created with ID:', sessionId);
+          setCurrentSessionId(sessionId);
+          
+          // Refresh sessions list
+          const userSessions = await historyService.getUserSessions(user.uid);
+          setSessions(userSessions);
+
+          // Set initial conversation
+          const initialMessage: ConversationMessage = {
+            role: 'assistant',
+            content: `File "${file.name}" loaded successfully with ${jsonData.length} records.`,
+            timestamp: new Date()
+          };
+          setConversation([initialMessage]);
+        } catch (error) {
+          console.error('Error creating session:', error);
+        }
+      }
+      
       // Set initial selected column and chart data
       if (schema.columns.length > 0) {
         setSelectedColumn(schema.columns[0].name);
@@ -419,7 +488,6 @@ function App() {
       }
     } catch (error) {
       console.error('Error parsing file:', error);
-      // Handle error appropriately
     } finally {
       setIsAnalyzing(false);
     }
@@ -432,14 +500,19 @@ function App() {
     
     try {
       const result = await analyzeData(query, schema, data);
-      return result;
+      return {
+        ...result,
+        timestamp: new Date() // Ensure timestamp is set
+      };
     } catch (error) {
       console.error('Error analyzing query:', error);
       throw error;
     }
   };
 
-  const copyToClipboard = async (text: string, type: 'message' | 'sql' | 'excel', index?: number) => {
+  const copyToClipboard = async (text: string | undefined, type: 'message' | 'sql' | 'excel', index?: number) => {
+    if (!text) return;
+    
     await navigator.clipboard.writeText(text);
     if (type === 'message' && index !== undefined) {
       setCopiedMessage(index);
@@ -793,8 +866,14 @@ function App() {
     e.preventDefault();
     if (!data.length || !query.trim() || isAnalyzing || !uploadedFile || !schema) return;
 
-    const newMessage = { role: 'user' as const, content: query };
-    setConversation(prev => [...prev, newMessage]);
+    const newMessage: ConversationMessage = {
+      role: 'user',
+      content: query,
+      timestamp: new Date()
+    };
+
+    const updatedConversation = [...conversation, newMessage];
+    setConversation(updatedConversation);
     setIsAnalyzing(true);
 
     try {
@@ -814,32 +893,53 @@ function App() {
       const formattedAnswer = formatResponse(result.answer, data);
       
       // Add assistant's response to conversation
-      setConversation(prev => [...prev, {
+      const assistantMessage: ConversationMessage = {
         role: 'assistant',
-        content: formattedAnswer
-      }]);
+        content: formattedAnswer,
+        timestamp: new Date()
+      };
+
+      const finalConversation = [...updatedConversation, assistantMessage];
+      setConversation(finalConversation);
 
       // Generate SQL query and Excel formula
       const sqlQuery = generateSqlQuery(query, tableName, schema);
       const excelFormula = generateExcelFormula(query, schema);
 
-      // Update query result with comparison data if available
-      setQueryResult({
-        ...result,
+      // Create query result with timestamp
+      const queryResult: QueryResult = {
         answer: formattedAnswer,
         sqlQuery: sqlQuery || 'This type of visualization query does not generate a SQL query.',
         needsChart: comparisonData !== null,
-        chartType: comparisonData?.chartType || result.chartType,
+        chartType: (comparisonData?.chartType || result.chartType || 'bar') as 'pie' | 'bar' | 'line' | null,
         chartData: comparisonData?.chartData || result.chartData,
         chartTitle: comparisonData?.chartTitle || result.chartTitle,
         chartSubtitle: comparisonData?.chartSubtitle || result.chartSubtitle,
-        chartDataColumn: result.chartDataColumn,
-        excelFormula: excelFormula || 'This type of visualization query does not generate an Excel formula.'
-      });
+        chartDataColumn: result.chartDataColumn || '',
+        excelFormula: excelFormula || 'This type of visualization query does not generate an Excel formula.',
+        timestamp: new Date()
+      };
 
-      // If it's a comparison query, automatically set chart type to bar
-      if (comparisonData) {
-        setChartType('bar');
+      // Update query result state
+      setQueryResult(queryResult);
+
+      // Save to Firestore if we have a session
+      if (user && currentSessionId) {
+        try {
+          await historyService.updateSession(
+            user.uid,
+            currentSessionId,
+            finalConversation,
+            [queryResult],
+            data // Pass the current data to keep it in sync
+          );
+          
+          // Refresh sessions list
+          const userSessions = await historyService.getUserSessions(user.uid);
+          setSessions(userSessions);
+        } catch (error) {
+          console.error('Error updating session:', error);
+        }
       }
 
       setQuery('');
@@ -850,10 +950,14 @@ function App() {
         ? `I apologize, but I encountered an error while processing your query: ${error.message}`
         : 'I apologize, but something went wrong. Could you please rephrase your question?';
 
-      setConversation(prev => [...prev, {
+      const errorAssistantMessage: ConversationMessage = {
         role: 'assistant',
-        content: errorMessage
-      }]);
+        content: errorMessage,
+        timestamp: new Date()
+      };
+
+      const finalConversation = [...updatedConversation, errorAssistantMessage];
+      setConversation(finalConversation);
 
       setQueryResult({
         answer: errorMessage,
@@ -861,7 +965,8 @@ function App() {
         needsChart: false,
         chartType: null,
         chartDataColumn: '',
-        excelFormula: ''
+        excelFormula: '',
+        timestamp: new Date()
       });
     } finally {
       setIsAnalyzing(false);
@@ -1131,20 +1236,13 @@ function App() {
   const handleChartTypeChange = (type: 'pie' | 'bar' | 'line') => {
     setChartType(type);
     if (queryResult) {
-      // Preserve all existing query result data while updating only the chart type
-      setQueryResult(prev => ({
-        ...prev!,
-        chartType: type,
-        // Ensure these properties are preserved
-        answer: prev!.answer,
-        sqlQuery: prev!.sqlQuery,
-        needsChart: prev!.needsChart,
-        chartData: prev!.chartData,
-        chartDataColumn: prev!.chartDataColumn,
-        executionTime: prev!.executionTime,
-        confidence: prev!.confidence,
-        excelFormula: prev!.excelFormula
-      }));
+      setQueryResult(prev => {
+        if (!prev) return prev;
+        return {
+          ...prev,
+          chartType: type
+        };
+      });
     }
   };
 
@@ -1216,10 +1314,17 @@ function App() {
   const handleSelectSession = async (session: HistorySession) => {
     setUploadedFile(null);
     setSchema(session.file.schema);
+    setData(session.file.data); // Load the complete data
     setConversation(session.conversation);
     setQueryResult(session.queries[session.queries.length - 1] || null);
     setCurrentSessionId(session.id);
     setIsHistorySidebarOpen(false);
+    
+    // Set initial selected column and chart data if available
+    if (session.file.schema.columns.length > 0) {
+      setSelectedColumn(session.file.schema.columns[0].name);
+      updateChartData(session.file.schema.columns[0].name);
+    }
   };
 
   const handleDeleteSession = async (sessionId: string) => {
@@ -1405,6 +1510,19 @@ function App() {
                 >
                   {darkMode ? <Sun className="h-4 w-4 sm:h-5 sm:w-5" /> : <Moon className="h-4 w-4 sm:h-5 sm:w-5" />}
                 </button>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => setIsHistorySidebarOpen(!isHistorySidebarOpen)}
+                    className={`p-2 rounded-lg ${
+                      darkMode
+                        ? 'bg-gray-700 hover:bg-gray-600 text-gray-200'
+                        : 'bg-gray-100 hover:bg-gray-200 text-gray-600'
+                    }`}
+                    title="History"
+                  >
+                    <Clock className="h-4 w-4" />
+                  </button>
+                </div>
               </div>
             </div>
           </div>
@@ -1790,7 +1908,7 @@ function App() {
                             {queryResult.excelFormula}
                           </p>
                           <button
-                            onClick={() => copyToClipboard(queryResult.excelFormula, 'excel')}
+                            onClick={() => queryResult?.excelFormula && copyToClipboard(queryResult.excelFormula, 'excel')}
                             className={`absolute top-1 sm:top-2 right-1 sm:right-2 p-1 sm:p-1.5 rounded-full transition-colors ${
                               darkMode 
                                 ? 'hover:bg-gray-600' 

@@ -5,33 +5,21 @@ import { getStorage } from "firebase/storage";
 import { getAnalytics } from "firebase/analytics";
 
 const firebaseConfig = {
-  apiKey: "AIzaSyApmhKNQHHdmO3Man3JXQlpGoM6pU6nq0c",
-  authDomain: "dataquery-ai-assistant.firebaseapp.com",
-  projectId: "dataquery-ai-assistant",
-  storageBucket: "dataquery-ai-assistant.appspot.com",
-  messagingSenderId: "1023322516021",
-  appId: "1:1023322516021:web:e9a7a26f2b95e763651f7c",
-  measurementId: "G-1PVMZR468B"
+  apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
+  authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN,
+  projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID,
+  storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET,
+  messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID,
+  appId: import.meta.env.VITE_FIREBASE_APP_ID
 };
 
 // Initialize Firebase
 const app = initializeApp(firebaseConfig);
-
-// Initialize Firebase services
 const auth = getAuth(app);
 const db = getFirestore(app);
 const storage = getStorage(app);
+const analytics = getAnalytics(app);
 
-// Initialize Analytics only in browser environment
-let analytics = null;
-if (typeof window !== 'undefined') {
-  try {
-    analytics = getAnalytics(app);
-  } catch (error) {
-    console.warn('Analytics failed to initialize:', error);
-  }
-}
-
-export { app, analytics, auth, db, storage };
+export { app, auth, db, storage, analytics };
 
 export default app; 

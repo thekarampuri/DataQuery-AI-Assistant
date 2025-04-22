@@ -1,3 +1,5 @@
+import { QueryResult as HistoryQueryResult } from '../types/history';
+
 export interface DataSchema {
   tableName: string;
   columns: Array<{ name: string; type: string }>;
@@ -8,19 +10,9 @@ export interface Message {
   content: string;
 }
 
-export interface QueryResult {
-  answer: string;
-  sqlQuery: string;
-  needsChart: boolean;
-  chartType: string | null;
-  chartData?: Array<{ name: string; value: number }>;
-  chartDataColumn?: string;
-  executionTime?: number;
-  confidence?: number;
-  chartTitle?: string;
-  chartSubtitle?: string;
-  excelFormula: string;
-}
+export type QueryResult = Omit<HistoryQueryResult, 'timestamp'> & {
+  timestamp: Date;
+};
 
 // Helper function to calculate average
 const calculateAverage = (values: number[]): number => {
@@ -64,7 +56,8 @@ const createDatasetSummary = (schema: DataSchema, data: any[]): QueryResult => {
       name: type,
       value: count
     })),
-    excelFormula: ''
+    excelFormula: '',
+    timestamp: new Date()
   };
 };
 
@@ -117,7 +110,8 @@ export const analyzeData = async (
       chartType: 'bar',
       chartDataColumn: relevantColumns[0].name,
       chartData: [],
-      excelFormula: ''
+      excelFormula: '',
+      timestamp: new Date()
     };
 
     try {

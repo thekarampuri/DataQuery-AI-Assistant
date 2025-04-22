@@ -4,11 +4,17 @@ export interface FileMetadata {
   name: string;
   uploadDate: Date;
   schema: DataSchema;
+  data: any[]; // Complete dataset
+  previewData: any[]; // First 10 rows for preview
+  totalRows: number;
+  fileType: string;
+  fileSize: number;
 }
 
 export interface ConversationMessage {
   role: 'user' | 'assistant';
   content: string;
+  timestamp: Date; // Make timestamp required
 }
 
 export interface ChartData {
@@ -24,21 +30,18 @@ export interface QueryResult {
   needsChart: boolean;
   chartType: 'pie' | 'bar' | 'line' | null;
   chartData?: Array<{ name: string; value: number }>;
-  chartDataColumn?: string;
-  executionTime?: number;
-  confidence?: number;
   chartTitle?: string;
   chartSubtitle?: string;
-  excelFormula: string;
+  chartDataColumn?: string;
+  excelFormula?: string;
+  timestamp: Date; // Make timestamp required
 }
 
 export interface HistorySession {
   id: string;
-  userId: string;
   file: FileMetadata;
-  conversation: Array<{ role: 'user' | 'assistant'; content: string }>;
-  queries: Array<QueryResult>;
+  conversation: ConversationMessage[];
+  queries: QueryResult[];
   createdAt: Date;
-  lastUpdated: Date;
-  title: string;
+  updatedAt: Date;
 } 
