@@ -387,15 +387,7 @@ const Auth: React.FC<AuthProps> = ({ darkMode, onClose, initialMode }) => {
                 </p>
               </div>
 
-              <div className="text-center mt-4">
-                <button
-                  type="button"
-                  onClick={handleAnonymousSignIn}
-                  className={`text-base font-medium ${darkMode ? 'text-gray-400 hover:text-gray-300' : 'text-gray-600 hover:text-gray-500'}`}
-                >
-                  Continue as Guest
-                </button>
-              </div>
+              
             </form>
           </div>
         </div>
