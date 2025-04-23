@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Upload, Database, FileSpreadsheet, PieChart, Download, Send, Table, ChevronLeft, ChevronRight, Moon, Sun, Copy, Check, BarChart, LineChart, Mic, MicOff, Volume1, Volume2, Book, Home, User, LogOut, Code, Clock, PlusCircle } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import ChartComponent from './components/ChartComponent';
@@ -18,6 +18,7 @@ import HistorySidebar from './components/HistorySidebar';
 import { QueryResult, HistorySession, ConversationMessage, FileMetadata } from './types/history';
 import * as historyService from './services/historyService';
 import { createUserDocument } from './services/historyService';
+import { addConversationMessage, getConversationMessages } from './services/rtdbService';
 
 // Add type for column
 interface Column {
@@ -205,6 +206,21 @@ function App() {
   const [sessions, setSessions] = useState<HistorySession[]>([]);
   const [currentSessionId, setCurrentSessionId] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const [isRecording, setIsRecording] = useState(false);
+  const [isPlaying, setIsPlaying] = useState(false);
+  const [itemsPerPage] = useState(10);
+  const [copied, setCopied] = useState(false);
+  const [showSidebar, setShowSidebar] = useState(true);
+  const [showHistory, setShowHistory] = useState(false);
+  const [showDataset, setShowDataset] = useState(false);
+  const [showCode, setShowCode] = useState(false);
+  const [showVisualization, setShowVisualization] = useState(false);
+  const [showSettings, setShowSettings] = useState(false);
+  const [showHelp, setShowHelp] = useState(false);
+  const [showProfile, setShowProfile] = useState(false);
+  const [showLogout, setShowLogout] = useState(false);
+  const [showAdd, setShowAdd] = useState(false);
+  const [showClock, setShowClock] = useState(false);
 
   useEffect(() => {
     const timer = setTimeout(() => {
@@ -317,12 +333,12 @@ function App() {
         try {
           const timestampedConversation = conversation.map(msg => ({
             ...msg,
-            timestamp: new Date()
+            timestamp: Date.now()
           }));
 
           const timestampedQueries = queryResult ? [{
             ...queryResult,
-            timestamp: new Date()
+            timestamp: Date.now()
           }] : [];
 
           await historyService.updateSession(
@@ -416,7 +432,7 @@ function App() {
       chartData: transformedData,
       chartDataColumn: columnName,
       excelFormula: '',
-      timestamp: new Date()
+      timestamp: Date.now()
     };
 
     setQueryResult(newQueryResult);
@@ -461,8 +477,8 @@ function App() {
           console.error('Error creating session:', error);
         }
       }
-      
-      // Set initial selected column and chart data
+        
+        // Set initial selected column and chart data
       if (schema.columns.length > 0) {
         setSelectedColumn(schema.columns[0].name);
         updateChartData(schema.columns[0].name);
@@ -483,7 +499,7 @@ function App() {
       const result = await analyzeData(query, schema, data);
       return {
         ...result,
-        timestamp: new Date() // Add timestamp to the result
+        timestamp: Date.now()
       };
     } catch (error) {
       console.error('Error analyzing query:', error);
@@ -849,8 +865,8 @@ function App() {
 
     const newMessage: ConversationMessage = {
       role: 'user',
-      content: query,
-      timestamp: new Date()
+      message: query,
+      timestamp: Date.now()
     };
     setConversation(prev => [...prev, newMessage]);
     setIsAnalyzing(true);
@@ -874,8 +890,8 @@ function App() {
       // Add assistant's response to conversation with timestamp
       const assistantMessage: ConversationMessage = {
         role: 'assistant',
-        content: formattedAnswer,
-        timestamp: new Date()
+        message: formattedAnswer,
+        timestamp: Date.now()
       };
       const updatedConversation: ConversationMessage[] = [...conversation, newMessage, assistantMessage];
       setConversation(updatedConversation);
@@ -895,33 +911,22 @@ function App() {
         chartSubtitle: comparisonData?.chartSubtitle || result.chartSubtitle,
         chartDataColumn: result.chartDataColumn || '',
         excelFormula: excelFormula || 'This type of visualization query does not generate an Excel formula.',
-        timestamp: new Date()
+        timestamp: Date.now()
       };
 
       // Update query result state
       setQueryResult(newQueryResult);
 
-      // Save to Firestore if we have a session
-      if (user && currentSessionId) {
+      // Store messages in RTDB if user is authenticated
+      if (user) {
         try {
-          console.log('Updating session:', currentSessionId);
-          await historyService.updateSession(
-            user.uid,
-            currentSessionId,
-            updatedConversation,
-            [newQueryResult],
-            data // Pass the current data to keep it in sync
-          );
-          console.log('Session updated successfully');
-          
-          // Refresh sessions list
-          const userSessions = await historyService.getUserSessions(user.uid);
-          setSessions(userSessions);
+          // Store user's message
+          await addConversationMessage(user.uid, newMessage.message, newMessage.role);
+          // Store assistant's response
+          await addConversationMessage(user.uid, assistantMessage.message, assistantMessage.role);
         } catch (error) {
-          console.error('Error updating session:', error);
+          console.error('Error storing messages in RTDB:', error);
         }
-      } else {
-        console.warn('No active session to save to:', { user, currentSessionId });
       }
 
       // If it's a comparison query, automatically set chart type to bar
@@ -939,10 +944,10 @@ function App() {
 
       const errorAssistantMessage: ConversationMessage = {
         role: 'assistant',
-        content: errorMessage,
-        timestamp: new Date()
+        message: errorMessage,
+        timestamp: Date.now()
       };
-      
+
       setConversation(prev => [...prev, errorAssistantMessage]);
 
       const errorQueryResult: QueryResult = {
@@ -952,7 +957,7 @@ function App() {
         chartType: null,
         chartDataColumn: '',
         excelFormula: '',
-        timestamp: new Date()
+        timestamp: Date.now()
       };
 
       setQueryResult(errorQueryResult);
@@ -1042,7 +1047,7 @@ function App() {
     
     conversation.forEach((message) => {
       const role = message.role === 'user' ? 'User' : 'Assistant';
-      const content = message.content;
+      const content = message.message;
       
       if (yOffset + 20 > pageHeight - margin) {
         // Add page number before creating new page
@@ -1352,7 +1357,7 @@ function App() {
 
   // Show loading state
   if (isLoading) {
-    return (
+  return (
       <div className={`min-h-screen flex items-center justify-center ${
         darkMode ? 'bg-gray-900' : 'bg-gradient-to-br from-indigo-50 via-purple-50 to-pink-50'
       }`}>
@@ -1360,9 +1365,9 @@ function App() {
           <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-indigo-500"></div>
           <p className={`text-sm ${darkMode ? 'text-gray-400' : 'text-gray-600'}`}>
             Loading...
-          </p>
+            </p>
+          </div>
         </div>
-      </div>
     );
   }
 
@@ -1423,14 +1428,14 @@ function App() {
                 <button
                     onClick={generatePDF}
                     className={`flex items-center px-2 sm:px-4 py-1 sm:py-2 rounded-lg text-xs sm:text-sm font-medium ${
-                      darkMode
-                        ? 'bg-gray-700 text-gray-200 hover:bg-gray-600'
-                        : 'bg-indigo-50 text-indigo-600 hover:bg-indigo-100'
-                    }`}
-                  >
+                    darkMode
+                      ? 'bg-gray-700 text-gray-200 hover:bg-gray-600'
+                      : 'bg-indigo-50 text-indigo-600 hover:bg-indigo-100'
+                  }`}
+                >
                     <Download className="h-3 w-3 sm:h-4 sm:w-4 mr-1 sm:mr-2" />
                     Export PDF
-                  </button>
+                </button>
                 )}
                 <button
                   onClick={() => {
@@ -1485,8 +1490,8 @@ function App() {
                 >
                   <LogOut className="h-4 w-4" />
                 </button>
-                <button
-                  onClick={() => setDarkMode(!darkMode)}
+              <button
+                onClick={() => setDarkMode(!darkMode)}
                   className={`p-1 sm:p-2 rounded-lg ${darkMode ? 'bg-gray-700 text-gray-200' : 'bg-gray-100 text-gray-600'} hover:opacity-80`}
                 >
                   {darkMode ? <Sun className="h-4 w-4 sm:h-5 sm:w-5" /> : <Moon className="h-4 w-4 sm:h-5 sm:w-5" />}
@@ -1502,7 +1507,7 @@ function App() {
                     title="History"
                   >
                     <Clock className="h-4 w-4" />
-                  </button>
+              </button>
                 </div>
               </div>
             </div>
@@ -1514,10 +1519,6 @@ function App() {
       <HistorySidebar
         isOpen={isHistorySidebarOpen}
         toggleSidebar={() => setIsHistorySidebarOpen(!isHistorySidebarOpen)}
-        sessions={sessions}
-        currentSessionId={currentSessionId}
-        onSelectSession={handleSelectSession}
-        onDeleteSession={handleDeleteSession}
         onNewChat={handleNewChat}
         darkMode={darkMode}
       />
@@ -1689,7 +1690,7 @@ function App() {
                 <div className="flex items-center justify-between mb-3 sm:mb-4">
                   <h2 className={`text-base sm:text-lg font-semibold ${darkMode ? 'text-white' : 'text-gray-900'}`}>
                     Conversation History
-                  </h2>
+                </h2>
                   {conversation.length > 0 && (
                     <button
                       onClick={() => {
@@ -1735,11 +1736,11 @@ function App() {
                       }`}
                     >
                       <p className={`${darkMode ? 'text-gray-200' : 'text-gray-700'} pr-12 text-sm sm:text-base`}>
-                        {message.content}
+                        {message.message}
                       </p>
                       <div className="absolute top-1 sm:top-2 right-1 sm:right-2 flex items-center space-x-1">
                         <button
-                          onClick={() => speak(message.content, index)}
+                          onClick={() => speak(message.message, index)}
                           className={`p-1 sm:p-1.5 rounded-full transition-colors ${
                             darkMode 
                               ? 'hover:bg-gray-600' 
@@ -1754,7 +1755,7 @@ function App() {
                           )}
                         </button>
                         <button
-                          onClick={() => copyToClipboard(message.content, 'message', index)}
+                          onClick={() => copyToClipboard(message.message, 'message', index)}
                           className={`p-1 sm:p-1.5 rounded-full transition-colors ${
                             darkMode 
                               ? 'hover:bg-gray-600' 
@@ -1772,7 +1773,7 @@ function App() {
                     </div>
                   ))}
                 </div>
-
+                
                 <form onSubmit={handleQuerySubmit}>
                   <div className="relative">
                     <textarea
@@ -1853,7 +1854,7 @@ function App() {
                   {queryResult ? (
                     <div className="space-y-3 sm:space-y-4">
                       {/* SQL Query Section */}
-                      {queryResult.sqlQuery && (
+                        {queryResult.sqlQuery && (
                         <div className={`p-3 sm:p-4 rounded-lg border relative ${darkMode ? 'bg-gray-900 border-gray-700' : 'bg-gradient-to-r from-indigo-50 to-purple-50 border-indigo-100'}`}>
                           <h3 className={`text-xs sm:text-sm font-medium mb-1.5 sm:mb-2 ${darkMode ? 'text-gray-300' : 'text-gray-700'}`}>
                             SQL Query
@@ -1876,7 +1877,7 @@ function App() {
                               <Copy className={`h-3 w-3 sm:h-4 sm:w-4 ${darkMode ? 'text-gray-400' : 'text-gray-600'}`} />
                             )}
                           </button>
-                        </div>
+                      </div>
                       )}
 
                       {/* Excel Formula Section */}
@@ -2006,8 +2007,8 @@ function App() {
                     darkMode={darkMode}
                     chartTitle={queryResult?.chartTitle}
                     chartSubtitle={queryResult?.chartSubtitle}
-                  />
-                </div>
+                      />
+                    </div>
               </div>
             </div>
           </div>

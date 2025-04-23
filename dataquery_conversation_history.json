@@ -1,0 +1,60 @@
+{
+  "users": {
+    "ASh9GrCHO8Pt439kRuh0S5jDlH03": {
+      "conversationHistory": [
+        {
+          "timestamp": 1745159400000,
+          "role": "user",
+          "message": "What is DataQuery Assistant?"
+        },
+        {
+          "timestamp": 1745159405000,
+          "role": "assistant",
+          "message": "DataQuery Assistant is an AI-powered tool that helps users interact with datasets using natural language queries."
+        }
+      ]
+    },
+    "nQUAJsY7hKhvBLG7Tw7Dn3yCnwk2": {
+      "conversationHistory": [
+        {
+          "timestamp": 1745159410000,
+          "role": "user",
+          "message": "Can you show me data from the last week?"
+        },
+        {
+          "timestamp": 1745159413000,
+          "role": "assistant",
+          "message": "Here is the data from the last 7 days..."
+        }
+      ]
+    },
+    "rJmY96z2vCZtmVDKjVV6JLuACyn1": {
+      "conversationHistory": [
+        {
+          "timestamp": 1745159420000,
+          "role": "user",
+          "message": "List all sales above $1000"
+        },
+        {
+          "timestamp": 1745159425000,
+          "role": "assistant",
+          "message": "These are the transactions with sales over $1000..."
+        }
+      ]
+    },
+    "VZ4QfObtI6cfy1KFXOfV9M5ktOs1": {
+      "conversationHistory": [
+        {
+          "timestamp": 1745159430000,
+          "role": "user",
+          "message": "Summarize the product reviews"
+        },
+        {
+          "timestamp": 1745159433000,
+          "role": "assistant",
+          "message": "Most users mentioned the product is efficient and reliable..."
+        }
+      ]
+    }
+  }
+}

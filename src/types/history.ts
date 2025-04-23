@@ -13,8 +13,8 @@ export interface FileMetadata {
 
 export interface ConversationMessage {
   role: 'user' | 'assistant';
-  content: string;
-  timestamp: Date; // Make timestamp required
+  message: string;
+  timestamp: number;
 }
 
 export interface ChartData {
@@ -34,7 +34,7 @@ export interface QueryResult {
   chartSubtitle?: string;
   chartDataColumn?: string;
   excelFormula?: string;
-  timestamp: Date; // Make timestamp required
+  timestamp: number;
 }
 
 export interface HistorySession {
@@ -42,6 +42,6 @@ export interface HistorySession {
   file: FileMetadata;
   conversation: ConversationMessage[];
   queries: QueryResult[];
-  createdAt: Date;
-  updatedAt: Date;
+  createdAt: number;
+  updatedAt: number;
 } 

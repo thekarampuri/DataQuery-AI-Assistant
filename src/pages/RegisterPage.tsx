@@ -4,6 +4,7 @@ import { createUserWithEmailAndPassword, updateProfile } from 'firebase/auth';
 import { auth } from '../config/firebase';
 import { useAuth } from '../hooks/useAuth';
 import { LogIn, UserPlus, Mail, Lock, User, X, Eye, EyeOff, Database } from 'lucide-react';
+import { createUserData } from '../services/rtdbService';
 
 interface RegisterPageProps {
   darkMode: boolean;
@@ -57,6 +58,10 @@ const RegisterPage: React.FC<RegisterPageProps> = ({ darkMode }) => {
       await updateProfile(userCredential.user, {
         displayName: `${firstName} ${lastName}`
       });
+      
+      // Create user data in RTDB
+      await createUserData(userCredential.user.uid);
+      
       navigate('/home');
     } catch (err: any) {
       setError(err.message || 'An error occurred');
